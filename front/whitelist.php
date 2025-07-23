@@ -38,13 +38,47 @@ if (isset($_POST["add_item"])) {
     Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/whitelist.php");
 }
 
+// -- 处理单个删除请求 --
+if (isset($_POST["delete_single"]) && isset($_POST["item_id"])) {
+    $item_id = intval($_POST["item_id"]);
+    $whitelist_obj = new PluginSoftwaremanagerSoftwareWhitelist();
+
+    // 使用正确的GLPI delete方法调用格式
+    if ($whitelist_obj->delete(['id' => $item_id], true)) {
+        Session::addMessageAfterRedirect(__('Item has been deleted'), false, INFO);
+    } else {
+        Session::addMessageAfterRedirect(__('Failed to delete item'), false, ERROR);
+    }
+    Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/whitelist.php");
+}
+
 // -- 处理批量删除请求 --
 if (isset($_POST["massive_action"])) {
     // 确认 'delete' 按钮被点击，并且有项目被选中
     if (isset($_POST['massive_action']['delete']) && isset($_POST['mass_action'])) {
-        $whitelist_obj = new PluginSoftwaremanagerSoftwareWhitelist();
-        $whitelist_obj->delete(array_keys($_POST['mass_action']));
-        Session::addMessageAfterRedirect(__('Selected items have been deleted'), true, INFO);
+        $deleted_count = 0;
+
+        // 逐个删除选中的项目
+        foreach ($_POST['mass_action'] as $item_id => $value) {
+            if ($value == 1) { // 确保checkbox被选中
+                $whitelist_obj = new PluginSoftwaremanagerSoftwareWhitelist();
+                $item_id = intval($item_id);
+
+                // 先检查项目是否存在
+                if ($whitelist_obj->getFromDB($item_id)) {
+                    // 使用标准的GLPI删除方法
+                    if ($whitelist_obj->delete(['id' => $item_id], true)) {
+                        $deleted_count++;
+                    }
+                }
+            }
+        }
+
+        if ($deleted_count > 0) {
+            Session::addMessageAfterRedirect(sprintf(__('%d items have been deleted'), $deleted_count), false, INFO);
+        } else {
+            Session::addMessageAfterRedirect(__('No items were deleted'), false, WARNING);
+        }
     }
     Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/whitelist.php");
 }
@@ -101,16 +135,21 @@ if (!empty($search)) {
 
 $all_whitelists = $whitelist->find($criteria, ['ORDER' => 'date_creation DESC']);
 
-// 搜索表单
+// GLPI标准筛选组件
 echo "<div class='center' style='margin-bottom: 20px;'>";
 echo "<form method='get' action='" . $_SERVER['PHP_SELF'] . "'>";
-echo "<table class='tab_cadre_fixe' style='width: 400px;'>";
+echo "<table class='tab_cadre_fixe'>";
 echo "<tr class='tab_bg_1'>";
-echo "<td style='width: 100px;'>" . __('Search') . ":</td>";
-echo "<td><input type='text' name='search' value='" . htmlspecialchars($search) . "' placeholder='" . __('Search in name or comment', 'softwaremanager') . "' style='width: 200px;'></td>";
+echo "<th colspan='4'>" . __('Search options') . "</th>";
+echo "</tr>";
+echo "<tr class='tab_bg_1'>";
+echo "<td>" . __('Search') . ":</td>";
+echo "<td><input type='text' name='search' value='" . htmlspecialchars($search) . "' placeholder='" . __('Search in name or comment', 'softwaremanager') . "' size='30'></td>";
 echo "<td><input type='submit' value='" . __('Search') . "' class='submit'></td>";
 if (!empty($search)) {
     echo "<td><a href='" . $_SERVER['PHP_SELF'] . "' class='vsubmit'>" . __('Reset') . "</a></td>";
+} else {
+    echo "<td></td>";
 }
 echo "</tr>";
 echo "</table>";
@@ -135,8 +174,8 @@ if (count($all_whitelists) > 0) {
     foreach ($all_whitelists as $id => $item) {
         echo "<tr class='tab_bg_1'>";
         echo "<td>";
-        // 注意：这里的 checkbox name 需要和下面的批量操作按钮对应
-        Html::showMassiveActionCheckBox('PluginSoftwaremanagerSoftwareWhitelist', $id, ['name' => 'mass_action']);
+        // 使用简单的HTML checkbox，确保name格式正确
+        echo "<input type='checkbox' name='mass_action[" . $id . "]' value='1'>";
         echo "</td>";
         echo "<td>".$item['name']."</td>";
         echo "<td>".($item['comment'] ?: '-')."</td>";
@@ -144,8 +183,8 @@ if (count($all_whitelists) > 0) {
         echo "<td>";
         // 单个删除按钮
         echo "<form method='post' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline;'>";
-        echo "<input type='hidden' name='mass_action[" . $id . "]' value='1'>";
-        echo "<input type='hidden' name='massive_action[delete]' value='1'>";
+        echo "<input type='hidden' name='item_id' value='" . $id . "'>";
+        echo "<input type='hidden' name='delete_single' value='1'>";
         echo "<input type='submit' value='" . __('Delete') . "' class='submit' onclick='return confirm(\"" . __('Confirm the final deletion?') . "\");'>";
         echo "</form>";
         echo "</td>";
@@ -157,20 +196,33 @@ if (count($all_whitelists) > 0) {
 
 echo "</table>";
 
-// 批量操作按钮栏
+// GLPI标准批量操作按钮
 if (count($all_whitelists) > 0) {
-    $massive_actions = [
-        // 关键：这里的 key 'delete' 必须和下面的 POST 处理逻辑对应
-        'delete' => __('Delete')
-    ];
-    Html::showMassiveActions($massive_actions);
+    echo "<div class='center' style='margin-top: 10px;'>";
+    echo "<table class='tab_cadre_fixe'>";
+    echo "<tr class='tab_bg_1'>";
+    echo "<td class='center'>";
+    echo "<input type='submit' name='massive_action[delete]' value='" . __('Delete permanently') . "' class='submit' onclick='return confirm(\"" . __('Confirm the final deletion?') . "\");'>";
+    echo "</td>";
+    echo "</tr>";
+    echo "</table>";
+    echo "</div>";
 }
 
 // **重要**：Html::closeForm() 会自动关闭表单标签
 Html::closeForm();
 
-
-
+// 添加JavaScript函数支持全选功能
+echo "<script type='text/javascript'>
+function checkAll(form, checked, fieldname) {
+    var checkboxes = form.querySelectorAll('input[name^=\"' + fieldname + '\"]');
+    for (var i = 0; i < checkboxes.length; i++) {
+        if (checkboxes[i].type === 'checkbox') {
+            checkboxes[i].checked = checked;
+        }
+    }
+}
+</script>";
 
 // 显示页面底部
 Html::footer();
