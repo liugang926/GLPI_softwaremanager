@@ -22,8 +22,8 @@ PluginSoftwaremanagerMenu::displayNavigationHeader('softwarelist');
 
 // Handle whitelist/blacklist actions
 if (isset($_POST['action'])) {
-    // CSRF check removed to fix "request not permitted" error
-    // Session::checkCSRF($_POST);
+    // 添加CSRF安全检查
+    Session::checkCSRF($_POST);
     
     // Handle single software action
     if (isset($_POST['software_name'])) {
@@ -254,8 +254,8 @@ if ($total_count > 0) {
 // Software list table
 if (count($software_list) > 0) {
     echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' id='batch-form'>";
-    // CSRF token removed to fix permission issues
-    // echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
+    // 添加CSRF安全令牌
+    echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
     echo Html::hidden('action', ['value' => '', 'id' => 'batch_action']);
     
     echo "<table class='tab_cadre_fixehov'>";
@@ -348,7 +348,7 @@ if (count($software_list) > 0) {
 
         // Add to whitelist button
         echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline;'>";
-        // echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
+        echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
         echo Html::hidden('action', ['value' => 'add_to_whitelist']);
         echo Html::hidden('software_name', ['value' => $software['software_name']]);
         echo "<button type='submit' class='btn btn-sm btn-success' title='Add to Whitelist'>";
@@ -358,7 +358,7 @@ if (count($software_list) > 0) {
 
         // Add to blacklist button
         echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline;'>";
-        // echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
+        echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
         echo Html::hidden('action', ['value' => 'add_to_blacklist']);
         echo Html::hidden('software_name', ['value' => $software['software_name']]);
         echo "<button type='submit' class='btn btn-sm btn-danger' title='Add to Blacklist'>";

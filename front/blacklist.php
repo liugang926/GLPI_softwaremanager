@@ -21,8 +21,9 @@ Html::header(__('Blacklist Management', 'softwaremanager'), $_SERVER['PHP_SELF']
 // Display navigation
 PluginSoftwaremanagerMenu::displayNavigationHeader('blacklist');
 
-// Handle quick add action - NO CSRF CHECK
+// Handle quick add action with CSRF check
 if (isset($_POST['quick_add']) && isset($_POST['software_name'])) {
+    Session::checkCSRF($_POST); // 添加CSRF安全检查
     $software_name = Html::cleanInputText($_POST['software_name']);
     $comment = isset($_POST['comment']) ? Html::cleanInputText($_POST['comment']) : '';
     
@@ -42,10 +43,11 @@ if (isset($_POST['quick_add']) && isset($_POST['software_name'])) {
     Html::redirect($_SERVER['PHP_SELF']);
 }
 
-// Quick add form - NO CSRF TOKEN
+// Quick add form with CSRF token
 echo "<div class='center' style='margin-bottom: 20px;'>";
 echo "<h3>" . __('Quick Add to Blacklist', 'softwaremanager') . "</h3>";
 echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline-block; text-align: left;'>";
+Session::formToken(); // 添加CSRF安全令牌
 echo "<table class='tab_cadre_fixe' style='width: 600px;'>";
 echo "<tr class='tab_bg_1'>";
 echo "<td style='width: 150px;'><label for='software_name'>" . __('Software Name', 'softwaremanager') . ":</label></td>";
