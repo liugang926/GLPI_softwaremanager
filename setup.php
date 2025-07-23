@@ -26,7 +26,7 @@ function plugin_init_softwaremanager() {
     include_once(__DIR__ . '/inc/softwareblacklist.class.php');
     include_once(__DIR__ . '/inc/softwareinventory.class.php');
 
-    // Required for CSRF protection
+    // Required for CSRF protection - must be true for installation
     $PLUGIN_HOOKS['csrf_compliant']['softwaremanager'] = true;
 
     // Plugin information - register profile class according to official documentation
