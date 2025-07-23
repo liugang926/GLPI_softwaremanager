@@ -52,49 +52,7 @@ if (isset($_POST["delete_single"]) && isset($_POST["item_id"])) {
     Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/whitelist.php");
 }
 
-// -- 处理批量删除请求 --
-if (isset($_POST["massive_action"])) {
-    // 调试：记录POST数据到文件
-    $debug_data = "POST Data:\n" . print_r($_POST, true) . "\n\n";
-    file_put_contents(__DIR__ . '/../debug_batch_delete.log', $debug_data, FILE_APPEND);
-
-    // 检查权限
-    Session::checkRight("config", "w");
-
-    // 确认 'delete' 按钮被点击，并且有项目被选中
-    if (isset($_POST['massive_action']['delete']) && isset($_POST['mass_action'])) {
-        $whitelist_obj = new PluginSoftwaremanagerSoftwareWhitelist();
-
-        // 获取所有被选中的项目ID数组
-        $items_to_delete = array_keys($_POST['mass_action']);
-        $deleted_count = 0;
-
-        // 调试：记录要删除的ID
-        file_put_contents(__DIR__ . '/../debug_batch_delete.log', "Items to delete: " . print_r($items_to_delete, true) . "\n", FILE_APPEND);
-
-        // **核心修正：遍历ID数组，为每个ID单独调用一次delete方法**
-        foreach ($items_to_delete as $item_id) {
-            file_put_contents(__DIR__ . '/../debug_batch_delete.log', "Deleting item ID: $item_id\n", FILE_APPEND);
-
-            // 以GLPI期望的格式 ['id' => id] 调用delete方法
-            if ($whitelist_obj->delete(['id' => $item_id])) {
-                $deleted_count++;
-                file_put_contents(__DIR__ . '/../debug_batch_delete.log', "Successfully deleted item ID: $item_id\n", FILE_APPEND);
-            } else {
-                file_put_contents(__DIR__ . '/../debug_batch_delete.log', "Failed to delete item ID: $item_id\n", FILE_APPEND);
-            }
-        }
-
-        file_put_contents(__DIR__ . '/../debug_batch_delete.log', "Total deleted: $deleted_count\n\n", FILE_APPEND);
-
-        if ($deleted_count > 0) {
-            Session::addMessageAfterRedirect(sprintf(__('%d items have been deleted'), $deleted_count), false, INFO);
-        } else {
-            Session::addMessageAfterRedirect(__('No items were deleted'), false, WARNING);
-        }
-    }
-    Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/whitelist.php");
-}
+// 批量删除现在通过AJAX处理，不需要POST处理逻辑
 
 // ----------------- 页面显示和表单处理 -----------------
 
@@ -210,34 +168,152 @@ if (count($all_whitelists) > 0) {
 
 echo "</table>";
 
-// GLPI标准批量操作按钮
+// AJAX批量操作按钮 - 必须在表单内部，在closeForm()之前
 if (count($all_whitelists) > 0) {
     echo "<div class='center' style='margin-top: 10px;'>";
-    echo "<table class='tab_cadre_fixe'>";
-    echo "<tr class='tab_bg_1'>";
-    echo "<td class='center'>";
-    echo "<input type='submit' name='massive_action[delete]' value='" . __('Delete permanently') . "' class='submit' onclick='return confirm(\"" . __('Confirm the final deletion?') . "\");'>";
-    echo "</td>";
-    echo "</tr>";
-    echo "</table>";
+    echo "<button type='button' id='batch-delete-btn' class='submit' onclick='batchDeleteWhitelist(); return false;'>" . __('Delete Selected Items') . "</button>";
     echo "</div>";
 }
 
 // **重要**：Html::closeForm() 会自动关闭表单标签
 Html::closeForm();
 
-// 添加JavaScript函数支持全选功能
-echo "<script type='text/javascript'>
+// 添加JavaScript函数支持全选功能和AJAX批量删除
+?>
+<script type="text/javascript">
+function batchDeleteWhitelist() {
+    console.log('batchDeleteWhitelist called');
+
+    // 阻止表单默认提交
+    event.preventDefault();
+
+    // 获取选中的项目
+    var selectedItems = getSelectedItems();
+    console.log('Selected items:', selectedItems);
+
+    if (selectedItems.length === 0) {
+        alert('请选择要删除的项目');
+        return false;
+    }
+
+    if (!confirm('确认要删除选中的 ' + selectedItems.length + ' 个项目吗？')) {
+        return false;
+    }
+
+    // 显示进度
+    showProgress();
+
+    // 开始批量删除
+    batchDeleteItems(selectedItems, 0);
+
+    return false;
+}
+
 function checkAll(form, checked, fieldname) {
-    var checkboxes = form.querySelectorAll('input[name^=\"' + fieldname + '\"]');
+    var checkboxes = form.querySelectorAll('input[name^="' + fieldname + '"]');
     for (var i = 0; i < checkboxes.length; i++) {
         if (checkboxes[i].type === 'checkbox') {
             checkboxes[i].checked = checked;
         }
     }
 }
-</script>";
 
+function getSelectedItems() {
+    var items = [];
+
+    // 直接查找所有选中的mass_action checkbox
+    var checkboxes = document.querySelectorAll('input[name^="mass_action["]:checked');
+    console.log('Found checkboxes:', checkboxes.length);
+
+    for (var i = 0; i < checkboxes.length; i++) {
+        var checkbox = checkboxes[i];
+        var nameMatch = checkbox.name.match(/mass_action\[(\d+)\]/);
+        if (nameMatch && nameMatch[1]) {
+            items.push(parseInt(nameMatch[1]));
+            console.log('Added item:', nameMatch[1]);
+        }
+    }
+
+    return items;
+}
+
+function showProgress() {
+    var btn = document.getElementById('batch-delete-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '正在处理批量删除...';
+    }
+}
+
+function hideProgress() {
+    var btn = document.getElementById('batch-delete-btn');
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = 'Delete Selected Items';
+    }
+}
+
+function batchDeleteItems(items, currentIndex) {
+    // 使用AJAX批量删除 - 一次性发送所有数据到后端处理
+    console.log('Starting batch delete for items:', items);
+
+    // 发送批量删除请求到AJAX处理器
+    fetch('../ajax/batch_delete.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'action=batch_delete&type=whitelist&items=' + encodeURIComponent(JSON.stringify(items))
+    })
+    .then(response => {
+        console.log('AJAX response status:', response.status);
+        if (!response.ok) {
+            throw new Error('Network response was not ok: ' + response.status);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('AJAX response data:', data);
+        hideProgress();
+
+        if (data.success) {
+            var message = '✅ 批量删除操作完成！\n\n';
+            message += '📊 处理结果：\n';
+            message += '• 总计项目: ' + (data.total_count || 0) + ' 个\n';
+            message += '• 成功删除: ' + (data.deleted_count || 0) + ' 个\n';
+            message += '• 删除失败: ' + (data.failed_count || 0) + ' 个\n';
+
+            if (data.message) {
+                message += '\n📝 详细信息: ' + data.message;
+            }
+
+            alert(message);
+
+            // 刷新页面显示最新数据
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            alert('❌ 批量删除失败！\n\n错误信息: ' + (data.error || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('Batch delete error:', error);
+        hideProgress();
+        alert('❌ 网络请求失败！\n\n错误详情: ' + error.message + '\n\n请检查网络连接或联系管理员。');
+    });
+}
+
+function updateProgress(current, total, percentage) {
+    var btn = document.getElementById('batch-delete-btn');
+    if (btn) {
+        btn.innerHTML = '删除中... (' + current + '/' + total + ') ' + percentage + '%';
+    }
+}
+
+
+</script>
+<?php
 // 显示页面底部
 Html::footer();
 ?>

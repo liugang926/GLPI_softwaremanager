@@ -52,35 +52,7 @@ if (isset($_POST["delete_single"]) && isset($_POST["item_id"])) {
     Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/blacklist.php");
 }
 
-// -- 处理批量删除请求 --
-if (isset($_POST["massive_action"])) {
-    // 检查权限
-    Session::checkRight("config", "w");
-
-    // 确认 'delete' 按钮被点击，并且有项目被选中
-    if (isset($_POST['massive_action']['delete']) && isset($_POST['mass_action'])) {
-        $blacklist_obj = new PluginSoftwaremanagerSoftwareBlacklist();
-
-        // 获取所有被选中的项目ID数组
-        $items_to_delete = array_keys($_POST['mass_action']);
-        $deleted_count = 0;
-
-        // **核心修正：遍历ID数组，为每个ID单独调用一次delete方法**
-        foreach ($items_to_delete as $item_id) {
-            // 以GLPI期望的格式 ['id' => id] 调用delete方法
-            if ($blacklist_obj->delete(['id' => $item_id])) {
-                $deleted_count++;
-            }
-        }
-
-        if ($deleted_count > 0) {
-            Session::addMessageAfterRedirect(sprintf(__('%d items have been deleted'), $deleted_count), false, INFO);
-        } else {
-            Session::addMessageAfterRedirect(__('No items were deleted'), false, WARNING);
-        }
-    }
-    Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/blacklist.php");
-}
+// 批量删除现在通过AJAX处理，不需要POST处理逻辑
 
 // ----------------- 页面显示和表单处理 -----------------
 
@@ -196,13 +168,13 @@ if (count($all_blacklists) > 0) {
 
 echo "</table>";
 
-// GLPI标准批量操作按钮
+// AJAX批量操作按钮
 if (count($all_blacklists) > 0) {
     echo "<div class='center' style='margin-top: 10px;'>";
     echo "<table class='tab_cadre_fixe'>";
     echo "<tr class='tab_bg_1'>";
     echo "<td class='center'>";
-    echo "<input type='submit' name='massive_action[delete]' value='" . __('Delete permanently') . "' class='submit' onclick='return confirm(\"" . __('Confirm the final deletion?') . "\");'>";
+    echo "<button type='button' id='batch-delete-btn' class='submit' onclick='batchDeleteBlacklist();'>" . __('Delete Selected Items') . "</button>";
     echo "</td>";
     echo "</tr>";
     echo "</table>";
@@ -212,7 +184,7 @@ if (count($all_blacklists) > 0) {
 // **重要**：Html::closeForm() 会自动关闭表单标签
 Html::closeForm();
 
-// 添加JavaScript函数支持全选功能
+// 添加JavaScript函数支持全选功能和AJAX批量删除
 echo "<script type='text/javascript'>
 function checkAll(form, checked, fieldname) {
     var checkboxes = form.querySelectorAll('input[name^=\"' + fieldname + '\"]');
@@ -221,6 +193,94 @@ function checkAll(form, checked, fieldname) {
             checkboxes[i].checked = checked;
         }
     }
+}
+
+// 获取选中的项目ID
+function getSelectedItems(formName) {
+    var items = [];
+    var form = document.forms[formName];
+
+    if (!form) {
+        return items;
+    }
+
+    var elements = form.elements;
+    for (var i = 0; i < elements.length; i++) {
+        var element = elements[i];
+        if (element.type === 'checkbox' &&
+            element.name.indexOf('mass_action[') === 0 &&
+            element.checked) {
+
+            // Extract ID from name like 'mass_action[123]'
+            var matches = element.name.match(/mass_action\[(\d+)\]/);
+            if (matches && matches[1]) {
+                items.push(parseInt(matches[1]));
+            }
+        }
+    }
+
+    return items;
+}
+
+// 简单的进度提示
+function showProgress() {
+    // 禁用删除按钮，显示加载状态
+    var btn = document.getElementById('batch-delete-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '正在删除...';
+    }
+}
+
+function hideProgress() {
+    // 恢复删除按钮
+    var btn = document.getElementById('batch-delete-btn');
+    if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = 'Delete Selected Items';
+    }
+}
+
+// 批量删除黑名单项目
+function batchDeleteBlacklist() {
+    var items = getSelectedItems('form_blacklist');
+
+    if (!items || items.length === 0) {
+        alert('请选择要删除的项目');
+        return;
+    }
+
+    if (!confirm('确认删除选中的 ' + items.length + ' 个项目吗？此操作不可撤销！')) {
+        return;
+    }
+
+    // 显示进度
+    showProgress();
+
+    // 使用原生fetch API替代jQuery.ajax
+    fetch('../ajax/batch_delete.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'action=batch_delete&type=blacklist&items=' + encodeURIComponent(JSON.stringify(items))
+    })
+    .then(response => response.json())
+    .then(data => {
+        hideProgress();
+        if (data && data.success) {
+            alert('删除完成！成功删除 ' + data.deleted_count + ' 个项目' +
+                  (data.failed_count > 0 ? '，失败 ' + data.failed_count + ' 个' : ''));
+            window.location.reload();
+        } else {
+            alert('删除失败：' + (data ? data.error : '未知错误'));
+        }
+    })
+    .catch(error => {
+        hideProgress();
+        console.log('Fetch Error:', error);
+        alert('删除失败：' + error.message);
+    });
 }
 </script>";
 
