@@ -27,9 +27,9 @@ PluginSoftwaremanagerMenu::displayNavigationHeader('whitelist');
 $whitelist = new PluginSoftwaremanagerSoftwareWhitelist();
 $all_whitelists = $whitelist->find();
 
-// OCS 模式: 使用 Html::form() 来创建表单。这会自动处理 CSRF 令牌！
-// 这是一个包裹了整个列表的表单，用于处理批量删除
+// 创建表单，包含 CSRF 令牌
 echo "<form name='form_whitelist' method='post' action='" . $_SERVER['PHP_SELF'] . "'>";
+Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
 
 echo "<table class='tab_cadre_fixehov'>";
 $header = "<tr class='tab_bg_1'>";
@@ -45,7 +45,7 @@ if (count($all_whitelists) > 0) {
         echo "<tr class='tab_bg_1'>";
         echo "<td>";
         // 注意：这里的 checkbox name 需要和下面的批量操作按钮对应
-        Html::showMassiveActionCheckBox('PluginSoftwaremanagerSoftwareWhitelist', $id, 'mass_action');
+        Html::showMassiveActionCheckBox('PluginSoftwaremanagerSoftwareWhitelist', $id, ['name' => 'mass_action']);
         echo "</td>";
         echo "<td>".$item['name']."</td>";
         echo "<td>".($item['comment'] ?: '-')."</td>";
@@ -67,8 +67,8 @@ if (count($all_whitelists) > 0) {
     Html::showMassiveActions($massive_actions);
 }
 
-// **重要**：Html::closeForm() 会自动关闭表单标签
-Html::closeForm();
+// 关闭表单
+echo "</form>";
 
 
 // ----------------- 添加新项目的独立表单 -----------------
@@ -76,8 +76,9 @@ Html::closeForm();
 echo "<div class='center' style='margin-top: 30px;'>";
 echo "<h3>" . __('Quick Add to Whitelist', 'softwaremanager') . "</h3>";
 
-// 使用第二个 Html::form() 创建添加表单，它也会自动获得自己独立的、有效的 CSRF 令牌
+// 创建添加表单，包含 CSRF 令牌
 echo "<form name='form_add' method='post' action='" . $_SERVER['PHP_SELF'] . "'>";
+Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
 echo "<table class='tab_cadre_fixe' style='width: 600px;'>";
 echo "<tr class='tab_bg_1'><th colspan='2'>".__('Add a new item to the whitelist', 'softwaremanager')."</th></tr>";
 
@@ -89,10 +90,10 @@ echo "<td><input type='text' name='comment' class='form-control' style='width: 3
 
 echo "<tr class='tab_bg_1'><td class='center' colspan='2'>";
 // 关键：提交按钮的 name='add' 必须和下面的 POST 处理逻辑对应
-echo "<input type='submit' name='add' value='".__s('Add to Whitelist', 'softwaremanager')."' class='submit'>";
+echo "<input type='submit' name='add_item' value='".__s('Add to Whitelist', 'softwaremanager')."' class='submit'>";
 echo "</td></tr>";
 echo "</table>";
-Html::closeForm();
+echo "</form>";
 
 echo "</div>";
 
@@ -101,9 +102,9 @@ echo "</div>";
 // (这部分代码放在页面渲染之后是 GLPI 的一个常见模式)
 
 // -- 处理添加请求 --
-if (isset($_POST["add"])) {
+if (isset($_POST["add_item"])) {
     // 检查权限
-    Session::checkRight("config", "w");
+    Session::checkRight("config", UPDATE);
 
     // 从 POST 数据中创建新的白名单对象
     // Html::form() 已经保证了 CSRF 安全，所以我们不需要手动检查
@@ -130,7 +131,7 @@ if (isset($_POST["add"])) {
 // -- 处理批量删除请求 --
 if (isset($_POST["massive_action"])) {
     // 检查权限
-    Session::checkRight("config", "w");
+    Session::checkRight("config", UPDATE);
 
     // 确认 'delete' 按钮被点击，并且有项目被选中
     if (isset($_POST['massive_action']['delete']) && isset($_POST['mass_action'])) {

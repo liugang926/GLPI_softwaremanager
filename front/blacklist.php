@@ -45,7 +45,7 @@ if (count($all_blacklists) > 0) {
         echo "<tr class='tab_bg_1'>";
         echo "<td>";
         // 注意：这里的 checkbox name 需要和下面的批量操作按钮对应
-        Html::showMassiveActionCheckBox('PluginSoftwaremanagerSoftwareBlacklist', $id, 'mass_action');
+        Html::showMassiveActionCheckBox('PluginSoftwaremanagerSoftwareBlacklist', $id, ['name' => 'mass_action']);
         echo "</td>";
         echo "<td>".$item['name']."</td>";
         echo "<td>".($item['comment'] ?: '-')."</td>";
@@ -89,7 +89,7 @@ echo "<td><input type='text' name='comment' class='form-control' style='width: 3
 
 echo "<tr class='tab_bg_1'><td class='center' colspan='2'>";
 // 关键：提交按钮的 name='add' 必须和下面的 POST 处理逻辑对应
-echo "<input type='submit' name='add' value='".__s('Add to Blacklist', 'softwaremanager')."' class='submit'>";
+echo "<input type='submit' name='add_blacklist_item' value='".__s('Add to Blacklist', 'softwaremanager')."' class='submit'>";
 echo "</td></tr>";
 echo "</table>";
 Html::closeForm();
@@ -101,9 +101,9 @@ echo "</div>";
 // (这部分代码放在页面渲染之后是 GLPI 的一个常见模式)
 
 // -- 处理添加请求 --
-if (isset($_POST["add"])) {
+if (isset($_POST["add_blacklist_item"])) {
     // 检查权限
-    Session::checkRight("config", "w");
+    Session::checkRight("config", UPDATE);
 
     // 从 POST 数据中创建新的黑名单对象
     // Html::form() 已经保证了 CSRF 安全，所以我们不需要手动检查
@@ -130,7 +130,7 @@ if (isset($_POST["add"])) {
 // -- 处理批量删除请求 --
 if (isset($_POST["massive_action"])) {
     // 检查权限
-    Session::checkRight("config", "w");
+    Session::checkRight("config", UPDATE);
 
     // 确认 'delete' 按钮被点击，并且有项目被选中
     if (isset($_POST['massive_action']['delete']) && isset($_POST['mass_action'])) {
