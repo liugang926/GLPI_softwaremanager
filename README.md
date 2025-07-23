@@ -55,7 +55,7 @@ Software Manager is an enhanced software asset management plugin for GLPI that p
 - **Abner Liu** (大刘讲IT)
 
 ### 仓库 (Repository)
-- https://github.com/liugang926/GLPI_softwarecompliance.git
+- https://github.com/liugang926/GLPI_softwaremanager.git
 
 ### 许可证 (License)
 - GPL-2.0+
