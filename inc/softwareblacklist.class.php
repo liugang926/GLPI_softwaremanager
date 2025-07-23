@@ -32,15 +32,15 @@ class PluginSoftwaremanagerSoftwareBlacklist extends CommonDBTM
     static function addToList($software_name, $comment = '') {
         $blacklist = new self();
         
-        // 检查是否已存在
-        $existing = $blacklist->find(['software_name' => $software_name]);
+        // 检查是否已存在 - 使用正确的字段名 'name'
+        $existing = $blacklist->find(['name' => $software_name]);
         if (!empty($existing)) {
             return false; // 已存在
         }
         
-        // 使用父类的add方法添加新记录
+        // 使用父类的add方法添加新记录 - 使用正确的字段名 'name'
         $input = [
-            'software_name' => $software_name,
+            'name' => $software_name,
             'comment' => $comment,
             'is_active' => 1,
             'date_creation' => date('Y-m-d H:i:s'),

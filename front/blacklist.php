@@ -47,7 +47,7 @@ if (count($all_blacklists) > 0) {
         // 注意：这里的 checkbox name 需要和下面的批量操作按钮对应
         Html::showMassiveActionCheckBox('PluginSoftwaremanagerSoftwareBlacklist', $id, 'mass_action');
         echo "</td>";
-        echo "<td>".$item['software_name']."</td>";
+        echo "<td>".$item['name']."</td>";
         echo "<td>".($item['comment'] ?: '-')."</td>";
         echo "<td>".Html::convDateTime($item['date_creation'])."</td>";
         echo "</tr>";
