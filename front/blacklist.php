@@ -54,41 +54,24 @@ if (isset($_POST["delete_single"]) && isset($_POST["item_id"])) {
 
 // -- 处理批量删除请求 --
 if (isset($_POST["massive_action"])) {
-    // 调试：记录完整的POST数据
-    file_put_contents('c:/temp/debug_post.txt', "POST Data:\n" . print_r($_POST, true) . "\n\n", FILE_APPEND);
+    // 检查权限
+    Session::checkRight("config", "w");
 
     // 确认 'delete' 按钮被点击，并且有项目被选中
     if (isset($_POST['massive_action']['delete']) && isset($_POST['mass_action'])) {
+        $blacklist_obj = new PluginSoftwaremanagerSoftwareBlacklist();
+
+        // 获取所有被选中的项目ID数组
+        $items_to_delete = array_keys($_POST['mass_action']);
         $deleted_count = 0;
 
-        file_put_contents('c:/temp/debug_post.txt', "Mass action data:\n" . print_r($_POST['mass_action'], true) . "\n\n", FILE_APPEND);
-
-        // 逐个删除选中的项目
-        foreach ($_POST['mass_action'] as $item_id => $value) {
-            file_put_contents('c:/temp/debug_post.txt', "Processing item_id: $item_id, value: $value\n", FILE_APPEND);
-
-            if ($value == 1) { // 确保checkbox被选中
-                $blacklist_obj = new PluginSoftwaremanagerSoftwareBlacklist();
-                $item_id = intval($item_id);
-
-                file_put_contents('c:/temp/debug_post.txt', "Attempting to delete item_id: $item_id\n", FILE_APPEND);
-
-                // 先检查项目是否存在
-                if ($blacklist_obj->getFromDB($item_id)) {
-                    // 使用标准的GLPI删除方法
-                    if ($blacklist_obj->delete(['id' => $item_id], true)) {
-                        $deleted_count++;
-                        file_put_contents('c:/temp/debug_post.txt', "Successfully deleted item_id: $item_id\n", FILE_APPEND);
-                    } else {
-                        file_put_contents('c:/temp/debug_post.txt', "Failed to delete item_id: $item_id\n", FILE_APPEND);
-                    }
-                } else {
-                    file_put_contents('c:/temp/debug_post.txt', "Item not found in DB: $item_id\n", FILE_APPEND);
-                }
+        // **核心修正：遍历ID数组，为每个ID单独调用一次delete方法**
+        foreach ($items_to_delete as $item_id) {
+            // 以GLPI期望的格式 ['id' => id] 调用delete方法
+            if ($blacklist_obj->delete(['id' => $item_id])) {
+                $deleted_count++;
             }
         }
-
-        file_put_contents('c:/temp/debug_post.txt', "Total deleted: $deleted_count\n\n", FILE_APPEND);
 
         if ($deleted_count > 0) {
             Session::addMessageAfterRedirect(sprintf(__('%d items have been deleted'), $deleted_count), false, INFO);
@@ -139,13 +122,14 @@ $blacklist = new PluginSoftwaremanagerSoftwareBlacklist();
 
 // 处理搜索过滤
 $search = isset($_GET['search']) ? Html::cleanInputText($_GET['search']) : '';
-$criteria = [];
+$criteria = [
+    'is_deleted' => 0  // 只显示未删除的项目
+];
+
 if (!empty($search)) {
-    $criteria = [
-        'OR' => [
-            'name' => ['LIKE', '%' . $search . '%'],
-            'comment' => ['LIKE', '%' . $search . '%']
-        ]
+    $criteria['OR'] = [
+        'name' => ['LIKE', '%' . $search . '%'],
+        'comment' => ['LIKE', '%' . $search . '%']
     ];
 }
 

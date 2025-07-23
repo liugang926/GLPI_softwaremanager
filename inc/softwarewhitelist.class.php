@@ -41,11 +41,13 @@ class PluginSoftwaremanagerSoftwareWhitelist extends CommonDBTM
                 `name` varchar(255) NOT NULL,
                 `comment` text,
                 `is_active` tinyint NOT NULL DEFAULT '1',
+                `is_deleted` tinyint NOT NULL DEFAULT '0',
                 `date_creation` timestamp NULL DEFAULT NULL,
                 `date_mod` timestamp NULL DEFAULT NULL,
                 PRIMARY KEY (`id`),
                 UNIQUE KEY `name` (`name`),
                 KEY `is_active` (`is_active`),
+                KEY `is_deleted` (`is_deleted`),
                 KEY `date_creation` (`date_creation`),
                 KEY `date_mod` (`date_mod`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
