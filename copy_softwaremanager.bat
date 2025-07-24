@@ -1,40 +1,63 @@
 @echo off
-setlocal enabledelayedexpansion
+chcp 65001 > nul
+title Git自动提交工具
 
-echo 开始执行目录操作...
-
-:: 删除Y盘下的softwaremanager目录（如果存在）
-echo 检查并删除Y:\softwaremanager目录...
-if exist "Y:\softwaremanager" (
-    rd /s /q "Y:\softwaremanager"
-    if !errorlevel! equ 0 (
-        echo Y:\softwaremanager目录已成功删除。
-    ) else (
-        echo 删除Y:\softwaremanager目录时出错，错误码: !errorlevel!
-        goto :error
-    )
-) else (
-    echo Y:\softwaremanager目录不存在，跳过删除操作。
+:: 检查是否在Git仓库中
+git status > nul 2>&1
+if %errorlevel% neq 0 (
+    echo 错误：当前目录不是Git仓库！
+    echo 请确保此脚本位于C:\Users\ND\Desktop\GLPI_Project\softwaremanager目录下
+    pause
+    exit /b 1
 )
 
-:: 复制桌面上的softwaremanager目录到Y盘，排除.git目录
-echo 开始复制C:\Users\ND\Desktop\GLPI_Project\softwaremanager目录到Y盘...
-echo 注意：.git目录及其内容将被排除...
+:: 获取当前分支名
+for /f "tokens=*" %%a in ('git branch --show-current') do set "current_branch=%%a"
 
-robocopy "C:\Users\ND\Desktop\GLPI_Project\softwaremanager" "Y:\softwaremanager" /E /NFL /NDL /NJH /NJS /XD .git /XF .gitattributes .gitignore
-if !errorlevel! leq 1 (
-    echo 目录复制成功完成。
-) else (
-    echo 复制过程中发生错误，错误码: !errorlevel!
-    goto :error
+:input_message
+cls
+echo ======================================
+echo          Git自动提交工具
+echo ======================================
+echo.
+echo 当前分支: %current_branch%
+echo.
+set /p commit_msg=请输入提交备注（输入"q"退出）: 
+if "%commit_msg%"=="q" exit /b 0
+
+if "%commit_msg%"=="" (
+    echo 提交备注不能为空！
+    timeout /t 2 > nul
+    goto input_message
 )
 
-echo 所有操作已成功完成。
-goto :end
+:: 执行Git操作
+echo.
+echo 正在添加所有文件（包括新增、修改和删除的文件）...
+git add -A 2>nul
 
-:error
-echo 操作过程中发生错误，请检查上面的错误信息。
+:: 检查是否有文件被添加到暂存区
+git diff --cached --quiet
+if %errorlevel% equ 0 (
+    echo 没有文件需要提交！请确保有修改或新增的文件。
+    pause
+    exit /b 1
+)
 
-:end
-endlocal
-pause    
+echo 正在提交代码...
+git commit -m "%commit_msg%"
+
+echo 正在拉取远程更新...
+git pull origin %current_branch%
+
+echo 正在推送代码到远程仓库...
+git push origin %current_branch%
+
+echo.
+echo ======================================
+echo         操作完成！提交备注：
+echo         %commit_msg%
+echo ======================================
+echo.
+
+pause
