@@ -9,21 +9,71 @@
 
 include('../../../inc/includes.php'); // 确保在最开始加载核心环境
 
+// 声明全局变量
+global $CFG_GLPI;
+
 // 检查用户权限
 Session::checkRight("config", UPDATE);
 
 // ----------------- POST 请求处理逻辑 -----------------
 // 必须在页面渲染之前处理POST请求
 
+// -- 处理编辑请求 --
+if (isset($_POST["add_item"]) && isset($_POST["edit_id"])) {
+    $edit_id = intval($_POST['edit_id']);
+    $software_name = Html::cleanInputText($_POST['software_name']);
+
+    if (!empty($software_name) && $edit_id > 0) {
+        try {
+            $blacklist_obj = new PluginSoftwaremanagerSoftwareBlacklist();
+
+            // 准备更新数据
+            $data = [
+                'id' => $edit_id,
+                'name' => $software_name,
+                'version' => isset($_POST['version']) ? Html::cleanInputText($_POST['version']) : null,
+                'publisher' => isset($_POST['publisher']) ? Html::cleanInputText($_POST['publisher']) : null,
+                'category' => isset($_POST['category']) ? Html::cleanInputText($_POST['category']) : null,
+                'comment' => isset($_POST['comment']) ? Html::cleanInputText($_POST['comment']) : '',
+                'exact_match' => isset($_POST['exact_match']) && $_POST['exact_match'] == '1' ? 1 : 0,
+                'priority' => isset($_POST['priority']) ? intval($_POST['priority']) : 0,
+                'is_active' => isset($_POST['is_active']) && $_POST['is_active'] == '1' ? 1 : 0
+            ];
+
+            if ($blacklist_obj->update($data)) {
+                Session::addMessageAfterRedirect("黑名单项目 '$software_name' 已成功更新", false, INFO);
+            } else {
+                Session::addMessageAfterRedirect("无法更新黑名单项目", false, ERROR);
+            }
+        } catch (Exception $e) {
+            Session::addMessageAfterRedirect("更新失败: " . $e->getMessage(), false, ERROR);
+        }
+    } else {
+        Session::addMessageAfterRedirect("软件名称不能为空或ID无效", false, ERROR);
+    }
+    Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/blacklist.php");
+}
+
 // -- 处理添加请求 --
 if (isset($_POST["add_item"])) {
     // 从 POST 数据中创建新的黑名单对象
     $software_name = Html::cleanInputText($_POST['software_name']);
-    $comment = isset($_POST['comment']) ? Html::cleanInputText($_POST['comment']) : '';
 
     if (!empty($software_name)) {
         try {
-            if (PluginSoftwaremanagerSoftwareBlacklist::addToList($software_name, $comment)) {
+            // 使用扩展的添加方法，支持对象管理
+            $data = [
+                'name' => $software_name,
+                'version' => isset($_POST['version']) ? Html::cleanInputText($_POST['version']) : null,
+                'publisher' => isset($_POST['publisher']) ? Html::cleanInputText($_POST['publisher']) : null,
+                'category' => isset($_POST['category']) ? Html::cleanInputText($_POST['category']) : null,
+                'comment' => isset($_POST['comment']) ? Html::cleanInputText($_POST['comment']) : '',
+                'exact_match' => isset($_POST['exact_match']) && $_POST['exact_match'] == '1' ? 1 : 0, // checkbox处理
+                'priority' => isset($_POST['priority']) ? intval($_POST['priority']) : 0,
+                'is_active' => isset($_POST['is_active']) && $_POST['is_active'] == '1' ? 1 : 0 // checkbox处理
+            ];
+
+            if (PluginSoftwaremanagerSoftwareBlacklist::addToListExtended($data)) {
                 Session::addMessageAfterRedirect("软件 '$software_name' 已成功添加到黑名单", false, INFO);
             } else {
                 Session::addMessageAfterRedirect("无法添加软件到黑名单，可能已存在", false, WARNING);
@@ -52,7 +102,52 @@ if (isset($_POST["delete_single"]) && isset($_POST["item_id"])) {
     Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/blacklist.php");
 }
 
-// 批量删除现在通过AJAX处理，不需要POST处理逻辑
+// -- 处理批量删除请求 --
+if (isset($_POST['batch_delete'])) {
+    if (isset($_POST['mass_action']) && is_array($_POST['mass_action'])) {
+        $deleted_count = 0;
+        $failed_count = 0;
+
+        // 逐条处理每个选中的项目，使用与单个删除完全相同的方法
+        foreach ($_POST['mass_action'] as $id => $value) {
+            $id = intval($id);
+
+            if ($id > 0) {
+                // 为每个删除操作创建新的对象实例
+                $blacklist_obj = new PluginSoftwaremanagerSoftwareBlacklist();
+
+                // 使用与单个删除完全相同的方法
+                if ($blacklist_obj->delete(['id' => $id], true)) {
+                    $deleted_count++;
+                } else {
+                    $failed_count++;
+                }
+            }
+        }
+
+        // 显示结果消息
+        if ($deleted_count > 0) {
+            Session::addMessageAfterRedirect(
+                sprintf("批量删除完成：成功删除 %d 个项目", $deleted_count),
+                false,
+                INFO
+            );
+        }
+
+        if ($failed_count > 0) {
+            Session::addMessageAfterRedirect(
+                sprintf("批量删除完成：删除失败 %d 个项目", $failed_count),
+                false,
+                ERROR
+            );
+        }
+    } else {
+        Session::addMessageAfterRedirect("没有选中任何项目", false, WARNING);
+    }
+
+    // 重定向回列表页面
+    Html::redirect($CFG_GLPI["root_doc"] . "/plugins/softwaremanager/front/blacklist.php");
+}
 
 // ----------------- 页面显示和表单处理 -----------------
 
@@ -68,25 +163,64 @@ Html::header(
 // 显示导航菜单
 PluginSoftwaremanagerMenu::displayNavigationHeader('blacklist');
 
-// ----------------- 添加新项目的表单 (放在列表上方) -----------------
-echo "<div class='center' style='margin-bottom: 30px;'>";
-echo "<h3>" . __('Quick Add to Blacklist', 'softwaremanager') . "</h3>";
+// ----------------- 添加新项目的按钮 -----------------
+echo "<div class='center' style='margin-bottom: 20px;'>";
+echo "<button type='button' class='btn btn-success btn-lg' onclick='showAddModal()' title='" . __('Add new item to blacklist', 'softwaremanager') . "'>";
+echo "<i class='fas fa-plus'></i> " . __('Add to Blacklist', 'softwaremanager');
+echo "</button>";
+echo "</div>";
+
+// ----------------- 模态框表单 -----------------
+echo "<div id='addModal' class='modal' style='display: none;'>";
+echo "<div class='modal-content'>";
+echo "<div class='modal-header'>";
+echo "<h3>" . __('Add a new item to the blacklist', 'softwaremanager') . "</h3>";
+echo "<span class='close' onclick='hideAddModal()'>&times;</span>";
+echo "</div>";
+echo "<div class='modal-body'>";
 
 echo "<form name='form_add' method='post' action='" . $_SERVER['PHP_SELF'] . "'>";
-echo "<table class='tab_cadre_fixe' style='width: 600px;'>";
-echo "<tr class='tab_bg_1'><th colspan='2'>".__('Add a new item to the blacklist', 'softwaremanager')."</th></tr>";
+echo "<table class='tab_cadre_fixe' style='width: 100%;'>";
 
-echo "<tr class='tab_bg_1'><td style='width: 150px;'>".__('Software Name', 'softwaremanager')."</td>";
-echo "<td><input type='text' name='software_name' class='form-control' style='width: 300px;' required placeholder='" . __('Enter software name', 'softwaremanager') . "'></td></tr>";
+echo "<tr class='tab_bg_1'><td style='width: 150px;'>".__('Software Name', 'softwaremanager')." *</td>";
+echo "<td><input type='text' name='software_name' class='form-control' style='width: 100%;' required placeholder='" . __('Enter software name', 'softwaremanager') . "'></td></tr>";
+
+echo "<tr class='tab_bg_1'><td>".__('Version', 'softwaremanager')."</td>";
+echo "<td><input type='text' name='version' class='form-control' style='width: 100%;' placeholder='" . __('Software version (optional)', 'softwaremanager') . "'></td></tr>";
+
+echo "<tr class='tab_bg_1'><td>".__('Publisher', 'softwaremanager')."</td>";
+echo "<td><input type='text' name='publisher' class='form-control' style='width: 100%;' placeholder='" . __('Software publisher (optional)', 'softwaremanager') . "'></td></tr>";
+
+echo "<tr class='tab_bg_1'><td>".__('Category', 'softwaremanager')."</td>";
+echo "<td><input type='text' name='category' class='form-control' style='width: 100%;' placeholder='" . __('Software category (optional)', 'softwaremanager') . "'></td></tr>";
+
+echo "<tr class='tab_bg_1'><td>".__('Exact Match', 'softwaremanager')."</td>";
+echo "<td><label style='display: flex; align-items: center;'>";
+echo "<input type='checkbox' name='exact_match' value='1' style='margin-right: 8px;'>";
+echo "<span>" . __('Require exact match (unchecked = partial match allowed)', 'softwaremanager') . "</span>";
+echo "</label></td></tr>";
+
+echo "<tr class='tab_bg_1'><td>".__('Active', 'softwaremanager')."</td>";
+echo "<td><label style='display: flex; align-items: center;'>";
+echo "<input type='checkbox' name='is_active' value='1' checked style='margin-right: 8px;'>";
+echo "<span>" . __('Active (unchecked = disabled)', 'softwaremanager') . "</span>";
+echo "</label></td></tr>";
+
+echo "<tr class='tab_bg_1'><td>".__('Priority', 'softwaremanager')."</td>";
+echo "<td><input type='number' name='priority' class='form-control' style='width: 100%;' value='0' min='0' max='100' placeholder='" . __('Priority (0-100)', 'softwaremanager') . "'></td></tr>";
 
 echo "<tr class='tab_bg_1'><td>".__('Comment', 'softwaremanager')."</td>";
-echo "<td><input type='text' name='comment' class='form-control' style='width: 300px;' placeholder='" . __('Optional comment', 'softwaremanager') . "'></td></tr>";
+echo "<td><textarea name='comment' class='form-control' style='width: 100%; height: 60px;' placeholder='" . __('Optional comment', 'softwaremanager') . "'></textarea></td></tr>";
 
 echo "<tr class='tab_bg_1'><td class='center' colspan='2'>";
-echo "<input type='submit' name='add_item' value='".__s('Add to Blacklist', 'softwaremanager')."' class='submit'>";
+echo "<button type='submit' name='add_item' class='btn btn-success'><i class='fas fa-plus'></i> " . __('Add to Blacklist', 'softwaremanager') . "</button>";
+echo "<button type='button' class='btn btn-secondary' onclick='hideAddModal()' style='margin-left: 10px;'><i class='fas fa-times'></i> " . __('Cancel') . "</button>";
 echo "</td></tr>";
 echo "</table>";
 Html::closeForm();
+
+echo "</div>";
+echo "</div>";
 echo "</div>";
 
 // 获取所有黑名单项目用于显示
@@ -131,11 +265,17 @@ echo "</div>";
 // 使用标准表单创建方式，这会自动处理 CSRF 令牌！
 // 这是一个包裹了整个列表的表单，用于处理批量删除
 echo "<form name='form_blacklist' method='post' action='" . $_SERVER['PHP_SELF'] . "'>";
+echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
 
 echo "<table class='tab_cadre_fixehov'>";
 $header = "<tr class='tab_bg_1'>";
 $header .= "<th width='10'><input type='checkbox' name='checkall' title=\"".__s('Check all')."\" onclick=\"checkAll(this.form, this.checked, 'mass_action');\"></th>";
 $header .= "<th>".__('Software Name', 'softwaremanager')."</th>";
+$header .= "<th>".__('Version', 'softwaremanager')."</th>";
+$header .= "<th>".__('Publisher', 'softwaremanager')."</th>";
+$header .= "<th>".__('Exact Match', 'softwaremanager')."</th>";
+$header .= "<th>".__('Priority', 'softwaremanager')."</th>";
+$header .= "<th>".__('Active', 'softwaremanager')."</th>";
 $header .= "<th>".__('Comment', 'softwaremanager')."</th>";
 $header .= "<th>".__('Date Added', 'softwaremanager')."</th>";
 $header .= "<th>".__('Actions', 'softwaremanager')."</th>";
@@ -144,145 +284,174 @@ echo $header;
 
 if (count($all_blacklists) > 0) {
     foreach ($all_blacklists as $id => $item) {
-        echo "<tr class='tab_bg_1'>";
+        echo "<tr class='tab_bg_1' data-id='" . $id . "'>";
         echo "<td>";
         // 使用简单的HTML checkbox，确保name格式正确
         echo "<input type='checkbox' name='mass_action[" . $id . "]' value='1'>";
         echo "</td>";
         echo "<td>".$item['name']."</td>";
+        echo "<td>".($item['version'] ?: '-')."</td>";
+        echo "<td>".($item['publisher'] ?: '-')."</td>";
+        echo "<td>".($item['exact_match'] ? __('Yes') : __('No'))."</td>";
+        echo "<td>".($item['priority'] ?: '0')."</td>";
+        echo "<td>".($item['is_active'] ? __('Yes') : __('No'))."</td>";
         echo "<td>".($item['comment'] ?: '-')."</td>";
         echo "<td>".Html::convDateTime($item['date_creation'])."</td>";
         echo "<td>";
-        // 单个删除按钮
-        echo "<form method='post' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline;'>";
-        echo "<input type='hidden' name='item_id' value='" . $id . "'>";
-        echo "<input type='hidden' name='delete_single' value='1'>";
-        echo "<input type='submit' value='" . __('Delete') . "' class='submit' onclick='return confirm(\"" . __('Confirm the final deletion?') . "\");'>";
-        echo "</form>";
+        // 编辑按钮
+        echo "<button type='button' class='btn btn-primary btn-sm' onclick='editItem(" . $id . ");' title='" . __('Edit this item') . "' style='margin-right: 5px;'>";
+        echo "<i class='fas fa-edit'></i> " . __('Edit');
+        echo "</button>";
+        // 美化的删除按钮
+        echo "<button type='button' class='btn btn-danger btn-sm' onclick='deleteSingle(" . $id . ");' title='" . __('Delete this item') . "'>";
+        echo "<i class='fas fa-trash-alt'></i> " . __('Delete');
+        echo "</button>";
         echo "</td>";
         echo "</tr>";
     }
 } else {
-    echo "<tr class='tab_bg_1'><td colspan='5' class='center'>".__('No item found')."</td></tr>";
+    echo "<tr class='tab_bg_1'><td colspan='10' class='center'>".__('No item found')."</td></tr>";
 }
 
 echo "</table>";
 
-// AJAX批量操作按钮
+// 美化的批量操作按钮
 if (count($all_blacklists) > 0) {
-    echo "<div class='center' style='margin-top: 10px;'>";
-    echo "<table class='tab_cadre_fixe'>";
-    echo "<tr class='tab_bg_1'>";
-    echo "<td class='center'>";
-    echo "<button type='button' id='batch-delete-btn' class='submit' onclick='batchDeleteBlacklist();'>" . __('Delete Selected Items') . "</button>";
-    echo "</td>";
-    echo "</tr>";
-    echo "</table>";
+    echo "<div class='center' style='margin-top: 15px; margin-bottom: 15px;'>";
+    echo "<button type='submit' name='batch_delete' class='btn btn-warning btn-lg' onclick='return confirm(\"" . __('Are you sure you want to delete selected items?') . "\");' title='" . __('Delete all selected items') . "'>";
+    echo "<i class='fas fa-trash-alt'></i> " . __('Delete Selected Items');
+    echo "</button>";
     echo "</div>";
 }
 
 // **重要**：Html::closeForm() 会自动关闭表单标签
 Html::closeForm();
 
-// 添加JavaScript函数支持全选功能和AJAX批量删除
-echo "<script type='text/javascript'>
-function checkAll(form, checked, fieldname) {
-    var checkboxes = form.querySelectorAll('input[name^=\"' + fieldname + '\"]');
-    for (var i = 0; i < checkboxes.length; i++) {
-        if (checkboxes[i].type === 'checkbox') {
-            checkboxes[i].checked = checked;
-        }
-    }
-}
+// 添加CSS样式美化按钮和模态框
+echo '<style type="text/css">';
+echo '.btn { padding: 6px 12px; margin: 2px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 12px; }';
+echo '.btn-sm { padding: 4px 8px; font-size: 11px; }';
+echo '.btn-lg { padding: 10px 16px; font-size: 14px; }';
+echo '.btn-danger { background-color: #d9534f; color: white; }';
+echo '.btn-danger:hover { background-color: #c9302c; }';
+echo '.btn-warning { background-color: #f0ad4e; color: white; }';
+echo '.btn-warning:hover { background-color: #ec971f; }';
+echo '.btn-success { background-color: #5cb85c; color: white; }';
+echo '.btn-success:hover { background-color: #449d44; }';
+echo '.btn-secondary { background-color: #6c757d; color: white; }';
+echo '.btn-secondary:hover { background-color: #5a6268; }';
+echo '.fas { margin-right: 4px; }';
 
-// 获取选中的项目ID
-function getSelectedItems(formName) {
-    var items = [];
-    var form = document.forms[formName];
+// 模态框样式
+echo '.modal { position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }';
+echo '.modal-content { background-color: #fefefe; margin: 5% auto; padding: 0; border: 1px solid #888; width: 80%; max-width: 600px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }';
+echo '.modal-header { padding: 15px 20px; background-color: #f8f9fa; border-bottom: 1px solid #dee2e6; border-radius: 8px 8px 0 0; }';
+echo '.modal-header h3 { margin: 0; display: inline-block; }';
+echo '.modal-body { padding: 20px; }';
+echo '.close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }';
+echo '.close:hover, .close:focus { color: #000; text-decoration: none; }';
 
-    if (!form) {
-        return items;
-    }
+// checkbox样式
+echo 'input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }';
+echo 'label { cursor: pointer; font-size: 13px; }';
 
-    var elements = form.elements;
-    for (var i = 0; i < elements.length; i++) {
-        var element = elements[i];
-        if (element.type === 'checkbox' &&
-            element.name.indexOf('mass_action[') === 0 &&
-            element.checked) {
+echo '</style>';
 
-            // Extract ID from name like 'mass_action[123]'
-            var matches = element.name.match(/mass_action\[(\d+)\]/);
-            if (matches && matches[1]) {
-                items.push(parseInt(matches[1]));
-            }
-        }
-    }
+// 添加JavaScript函数
+echo '<script type="text/javascript">';
+echo 'function checkAll(form, checked, fieldname) {';
+echo '    var checkboxes = form.querySelectorAll("input[name^=\\"" + fieldname + "\\"]");';
+echo '    for (var i = 0; i < checkboxes.length; i++) {';
+echo '        if (checkboxes[i].type === "checkbox") {';
+echo '            checkboxes[i].checked = checked;';
+echo '        }';
+echo '    }';
+echo '}';
+echo '';
+echo 'function deleteSingle(id) {';
+echo '    if (confirm("' . __('Confirm the final deletion?') . '")) {';
+echo '        var form = document.forms["form_blacklist"];';
+echo '        var input = document.createElement("input");';
+echo '        input.type = "hidden";';
+echo '        input.name = "delete_single";';
+echo '        input.value = "1";';
+echo '        form.appendChild(input);';
+echo '        var input2 = document.createElement("input");';
+echo '        input2.type = "hidden";';
+echo '        input2.name = "item_id";';
+echo '        input2.value = id;';
+echo '        form.appendChild(input2);';
+echo '        form.submit();';
+echo '    }';
+echo '}';
+echo '';
+echo 'function editItem(id) {';
+echo '    var row = document.querySelector("tr[data-id=\'" + id + "\']");';
+echo '    if (!row) {';
+echo '        alert("无法找到要编辑的项目");';
+echo '        return;';
+echo '    }';
+echo '    var cells = row.getElementsByTagName("td");';
+echo '    var name = cells[1].textContent.trim();';
+echo '    var version = cells[2].textContent.trim();';
+echo '    var publisher = cells[3].textContent.trim();';
+echo '    var exactMatch = cells[4].textContent.trim() === "' . __('Yes') . '" ? true : false;';
+echo '    var priority = cells[5].textContent.trim();';
+echo '    var isActive = cells[6].textContent.trim() === "' . __('Yes') . '" ? true : false;';
+echo '    var comment = cells[7].textContent.trim();';
+echo '    document.querySelector("[name=\\"software_name\\"]").value = name;';
+echo '    document.querySelector("[name=\\"version\\"]").value = version === "-" ? "" : version;';
+echo '    document.querySelector("[name=\\"publisher\\"]").value = publisher === "-" ? "" : publisher;';
+echo '    document.querySelector("[name=\\"category\\"]").value = "";';
+echo '    document.querySelector("[name=\\"exact_match\\"]").checked = exactMatch;';
+echo '    document.querySelector("[name=\\"priority\\"]").value = priority;';
+echo '    document.querySelector("[name=\\"is_active\\"]").checked = isActive;';
+echo '    document.querySelector("[name=\\"comment\\"]").value = comment === "-" ? "" : comment;';
+echo '    var editIdField = document.querySelector("[name=\\"edit_id\\"]");';
+echo '    if (!editIdField) {';
+echo '        editIdField = document.createElement("input");';
+echo '        editIdField.type = "hidden";';
+echo '        editIdField.name = "edit_id";';
+echo '        document.querySelector("#addModal form").appendChild(editIdField);';
+echo '    }';
+echo '    editIdField.value = id;';
+echo '    document.querySelector("#addModal h3").textContent = "编辑黑名单项目";';
+echo '    document.querySelector("#addModal button[type=\\"submit\\"]").innerHTML = "<i class=\\"fas fa-save\\"></i> 更新";';
+echo '    document.getElementById("addModal").style.display = "block";';
+echo '}';
+echo '';
 
-    return items;
-}
+echo 'function showAddModal() {';
+echo '    document.querySelector("#addModal h3").textContent = "' . __('Add a new item to the blacklist', 'softwaremanager') . '";';
+echo '    document.querySelector("#addModal button[type=\\"submit\\"]").innerHTML = "<i class=\\"fas fa-plus\\"></i> ' . __('Add to Blacklist', 'softwaremanager') . '";';
+echo '    document.querySelector("[name=\\"software_name\\"]").value = "";';
+echo '    document.querySelector("[name=\\"version\\"]").value = "";';
+echo '    document.querySelector("[name=\\"publisher\\"]").value = "";';
+echo '    document.querySelector("[name=\\"category\\"]").value = "";';
+echo '    document.querySelector("[name=\\"exact_match\\"]").checked = false;';
+echo '    document.querySelector("[name=\\"priority\\"]").value = "0";';
+echo '    document.querySelector("[name=\\"is_active\\"]").checked = true;';
+echo '    document.querySelector("[name=\\"comment\\"]").value = "";';
+echo '    var editIdField = document.querySelector("[name=\\"edit_id\\"]");';
+echo '    if (editIdField) {';
+echo '        editIdField.remove();';
+echo '    }';
+echo '    document.getElementById("addModal").style.display = "block";';
+echo '}';
 
-// 简单的进度提示
-function showProgress() {
-    // 禁用删除按钮，显示加载状态
-    var btn = document.getElementById('batch-delete-btn');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '正在删除...';
-    }
-}
+echo 'function hideAddModal() {';
+echo '    document.getElementById("addModal").style.display = "none";';
+echo '}';
 
-function hideProgress() {
-    // 恢复删除按钮
-    var btn = document.getElementById('batch-delete-btn');
-    if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = 'Delete Selected Items';
-    }
-}
+// 点击模态框外部关闭
+echo 'window.onclick = function(event) {';
+echo '    var modal = document.getElementById("addModal");';
+echo '    if (event.target == modal) {';
+echo '        modal.style.display = "none";';
+echo '    }';
+echo '}';
 
-// 批量删除黑名单项目
-function batchDeleteBlacklist() {
-    var items = getSelectedItems('form_blacklist');
-
-    if (!items || items.length === 0) {
-        alert('请选择要删除的项目');
-        return;
-    }
-
-    if (!confirm('确认删除选中的 ' + items.length + ' 个项目吗？此操作不可撤销！')) {
-        return;
-    }
-
-    // 显示进度
-    showProgress();
-
-    // 使用原生fetch API替代jQuery.ajax
-    fetch('../ajax/batch_delete.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: 'action=batch_delete&type=blacklist&items=' + encodeURIComponent(JSON.stringify(items))
-    })
-    .then(response => response.json())
-    .then(data => {
-        hideProgress();
-        if (data && data.success) {
-            alert('删除完成！成功删除 ' + data.deleted_count + ' 个项目' +
-                  (data.failed_count > 0 ? '，失败 ' + data.failed_count + ' 个' : ''));
-            window.location.reload();
-        } else {
-            alert('删除失败：' + (data ? data.error : '未知错误'));
-        }
-    })
-    .catch(error => {
-        hideProgress();
-        console.log('Fetch Error:', error);
-        alert('删除失败：' + error.message);
-    });
-}
-</script>";
+echo '</script>';
 
 // 显示页面底部
 Html::footer();

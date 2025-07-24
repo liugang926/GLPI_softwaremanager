@@ -257,6 +257,23 @@ if (count($software_list) > 0) {
     // 添加CSRF安全令牌
     echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
     echo Html::hidden('action', ['value' => '', 'id' => 'batch_action']);
+
+    // Batch operations toolbar - moved to top
+    echo "<div class='batch-operations-toolbar' style='margin-bottom: 15px; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;'>";
+    echo "<div style='display: flex; align-items: center; gap: 10px;'>";
+    echo "<span><strong>" . __('Batch Operations:', 'softwaremanager') . "</strong></span>";
+
+    echo "<button type='button' class='btn btn-sm btn-success' onclick='performBatchAction(\"batch_add_to_whitelist\")' disabled id='batch_whitelist_btn'>";
+    echo "<i class='fas fa-check'></i> " . __('Add Selected to Whitelist', 'softwaremanager');
+    echo "</button>";
+
+    echo "<button type='button' class='btn btn-sm btn-danger' onclick='performBatchAction(\"batch_add_to_blacklist\")' disabled id='batch_blacklist_btn'>";
+    echo "<i class='fas fa-times'></i> " . __('Add Selected to Blacklist', 'softwaremanager');
+    echo "</button>";
+
+    echo "<span id='selected_count' style='margin-left: 20px; font-style: italic; color: #666;'>" . __('No items selected', 'softwaremanager') . "</span>";
+    echo "</div>";
+    echo "</div>";
     
     echo "<table class='tab_cadre_fixehov'>";
     echo "<thead>";
@@ -377,24 +394,7 @@ if (count($software_list) > 0) {
 
     echo "</tbody>";
     echo "</table>";
-    
-    // Batch operations toolbar
-    echo "<div class='batch-operations-toolbar' style='margin-top: 10px; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;'>";
-    echo "<div style='display: flex; align-items: center; gap: 10px;'>";
-    echo "<span><strong>" . __('Batch Operations:', 'softwaremanager') . "</strong></span>";
-    
-    echo "<button type='button' class='btn btn-sm btn-success' onclick='performBatchAction(\"batch_add_to_whitelist\")' disabled id='batch_whitelist_btn'>";
-    echo "<i class='fas fa-check'></i> " . __('Add Selected to Whitelist', 'softwaremanager');
-    echo "</button>";
-    
-    echo "<button type='button' class='btn btn-sm btn-danger' onclick='performBatchAction(\"batch_add_to_blacklist\")' disabled id='batch_blacklist_btn'>";
-    echo "<i class='fas fa-times'></i> " . __('Add Selected to Blacklist', 'softwaremanager');
-    echo "</button>";
-    
-    echo "<span id='selected_count' style='margin-left: 20px; font-style: italic; color: #666;'>" . __('No items selected', 'softwaremanager') . "</span>";
-    echo "</div>";
-    echo "</div>";
-    
+
     echo "</form>";
 
     // Pagination
