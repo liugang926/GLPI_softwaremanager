@@ -279,5 +279,59 @@ class PluginSoftwaremanagerSoftwareWhitelist extends CommonDBTM
 
         return $input;
     }
+
+    /**
+     * 从白名单中移除软件
+     *
+     * @param string $software_name 软件名称
+     * @param string $comment 备注信息
+     * @return array 返回操作结果 ['success' => bool, 'action' => string, 'id' => int|null]
+     */
+    static function removeFromList($software_name, $comment = '') {
+        global $DB;
+
+        $whitelist = new self();
+        $table = self::getTable();
+
+        // 查找匹配的记录
+        $existing = $whitelist->find(['name' => $software_name]);
+
+        if (empty($existing)) {
+            // 没有找到匹配的记录
+            return [
+                'success' => false,
+                'action' => 'not_found',
+                'id' => null
+            ];
+        }
+
+        // 获取第一条记录
+        $record = reset($existing);
+        $id = $record['id'];
+
+        // 更新记录为非活动状态
+        $update = [
+            'id' => $id,
+            'is_active' => 0,
+            'comment' => $comment ? $comment : $record['comment'] . ' (Deactivated)',
+            'date_mod' => $_SESSION["glpi_currenttime"]
+        ];
+
+        $result = $whitelist->update($update);
+
+        if ($result) {
+            return [
+                'success' => true,
+                'action' => 'deactivated',
+                'id' => $id
+            ];
+        } else {
+            return [
+                'success' => false,
+                'action' => 'deactivate_failed',
+                'id' => $id
+            ];
+        }
+    }
 }
 ?>

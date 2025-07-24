@@ -40,6 +40,12 @@ if (isset($_POST['action'])) {
             case 'add_to_blacklist':
                 $operation_name = '添加到黑名单';
                 break;
+            case 'remove_from_whitelist':
+                $operation_name = '从白名单移除';
+                break;
+            case 'remove_from_blacklist':
+                $operation_name = '从黑名单移除';
+                break;
             default:
                 $operation_name = '未知操作';
         }
@@ -60,6 +66,12 @@ if (isset($_POST['action'])) {
             case 'add_to_blacklist':
                 $result = PluginSoftwaremanagerSoftwareBlacklist::addToList($software_name, 'Added by ' . $user_name);
                 break;
+            case 'remove_from_whitelist':
+                $result = PluginSoftwaremanagerSoftwareWhitelist::removeFromList($software_name, 'Removed by ' . $user_name);
+                break;
+            case 'remove_from_blacklist':
+                $result = PluginSoftwaremanagerSoftwareBlacklist::removeFromList($software_name, 'Removed by ' . $user_name);
+                break;
         }
 
         // 处理新的返回格式
@@ -74,7 +86,10 @@ if (isset($_POST['action'])) {
                 'restored' => '恢复成功(之前被删除或禁用)',
                 'already_exists' => '已存在且处于活动状态',
                 'restore_failed' => '恢复失败',
-                'create_failed' => '创建失败'
+                'create_failed' => '创建失败',
+                'deactivated' => '成功移除(设为非活动状态)',
+                'not_found' => '未找到匹配记录',
+                'deactivate_failed' => '移除失败'
             ];
 
             $action_desc = $action_descriptions[$action] ?? $action;
@@ -98,6 +113,10 @@ if (isset($_POST['action'])) {
                         $message = sprintf(__('成功恢复 "%s" 到%s (之前被删除或禁用)', 'softwaremanager'), $software_name, $operation_name);
                         Session::addMessageAfterRedirect($message, true);
                         break;
+                    case 'deactivated':
+                        $message = sprintf(__('成功将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, true);
+                        break;
                 }
             } else {
                 switch ($action) {
@@ -110,6 +129,14 @@ if (isset($_POST['action'])) {
                         Session::addMessageAfterRedirect($message, false);
                         break;
                     case 'create_failed':
+                        $message = sprintf(__('无法将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, false);
+                        break;
+                    case 'not_found':
+                        $message = sprintf(__('未找到 "%s" 在%s中的记录', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, false);
+                        break;
+                    case 'deactivate_failed':
                         $message = sprintf(__('无法将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
                         Session::addMessageAfterRedirect($message, false);
                         break;
@@ -661,37 +688,48 @@ if (count($software_list) > 0) {
         $is_whitelisted = isset($software['is_whitelisted']) ? (bool)$software['is_whitelisted'] : false;
         $is_blacklisted = isset($software['is_blacklisted']) ? (bool)$software['is_blacklisted'] : false;
 
-        // Display status badges with click-to-remove functionality
+        // Display status badges with click-to-remove functionality and improved styling
         if ($status === 'both' || ($is_whitelisted && $is_blacklisted)) {
-            // Both whitelist and blacklist - both clickable to remove
-            echo "<span class='badge badge-success clickable-status' style='margin-right: 5px; cursor: pointer;' ";
+            // Both whitelist and blacklist - both clickable to remove with better spacing and clear remove icon
+            echo "<div style='display: flex; flex-direction: column; gap: 5px;'>";
+
+            // Whitelist badge with remove icon
+            echo "<span class='badge badge-success clickable-status' style='cursor: pointer; display: flex; align-items: center; padding: 5px 8px; justify-content: space-between;' ";
             echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"whitelist\")' ";
             echo "title='" . __('Click to remove from whitelist', 'softwaremanager') . "'>";
-            echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
+            echo "<span><i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager') . "</span>";
+            echo "<i class='fas fa-trash-alt' style='margin-left: 8px; font-size: 0.85em;'></i>";
             echo "</span>";
-            echo "<span class='badge badge-danger clickable-status' style='cursor: pointer;' ";
+
+            // Blacklist badge with remove icon
+            echo "<span class='badge badge-danger clickable-status' style='cursor: pointer; display: flex; align-items: center; padding: 5px 8px; justify-content: space-between;' ";
             echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"blacklist\")' ";
             echo "title='" . __('Click to remove from blacklist', 'softwaremanager') . "'>";
-            echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
+            echo "<span><i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager') . "</span>";
+            echo "<i class='fas fa-trash-alt' style='margin-left: 8px; font-size: 0.85em;'></i>";
             echo "</span>";
+
+            echo "</div>";
         } else {
             switch ($status) {
                 case 'whitelist':
-                    echo "<span class='badge badge-success clickable-status' style='cursor: pointer;' ";
+                    echo "<span class='badge badge-success clickable-status' style='cursor: pointer; display: flex; align-items: center; padding: 5px 8px; justify-content: space-between;' ";
                     echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"whitelist\")' ";
                     echo "title='" . __('Click to remove from whitelist', 'softwaremanager') . "'>";
-                    echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
+                    echo "<span><i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager') . "</span>";
+                    echo "<i class='fas fa-trash-alt' style='margin-left: 8px; font-size: 0.85em;'></i>";
                     echo "</span>";
                     break;
                 case 'blacklist':
-                    echo "<span class='badge badge-danger clickable-status' style='cursor: pointer;' ";
+                    echo "<span class='badge badge-danger clickable-status' style='cursor: pointer; display: flex; align-items: center; padding: 5px 8px; justify-content: space-between;' ";
                     echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"blacklist\")' ";
                     echo "title='" . __('Click to remove from blacklist', 'softwaremanager') . "'>";
-                    echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
+                    echo "<span><i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager') . "</span>";
+                    echo "<i class='fas fa-trash-alt' style='margin-left: 8px; font-size: 0.85em;'></i>";
                     echo "</span>";
                     break;
                 default:
-                    echo "<span class='badge badge-secondary'>";
+                    echo "<span class='badge badge-secondary' style='padding: 5px 8px;'>";
                     echo "<i class='fas fa-question'></i> " . __('Unmanaged', 'softwaremanager');
                     echo "</span>";
                     break;
@@ -1466,6 +1504,26 @@ echo "}";
 // Table enhancements
 echo ".tab_cadre_fixehov th { background-color: #f8f9fa; font-weight: bold; }";
 echo ".tab_cadre_fixehov tr:hover { background-color: #f5f5f5; }";
+
+// Status badge enhancements
+echo ".clickable-status { ";
+echo "  transition: all 0.2s ease; ";
+echo "  min-width: 100px; ";
+echo "}";
+echo ".clickable-status:hover { ";
+echo "  transform: scale(1.05); ";
+echo "  box-shadow: 0 2px 4px rgba(0,0,0,0.2); ";
+echo "}";
+echo ".clickable-status:active { ";
+echo "  transform: scale(0.95); ";
+echo "}";
+echo ".clickable-status .fas.fa-trash-alt { ";
+echo "  opacity: 0.7; ";
+echo "  transition: opacity 0.2s ease; ";
+echo "}";
+echo ".clickable-status:hover .fas.fa-trash-alt { ";
+echo "  opacity: 1; ";
+echo "}";
 
 echo "</style>";
 

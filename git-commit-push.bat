@@ -33,17 +33,19 @@ if "%commit_msg%"=="" (
 
 :: 执行Git操作
 echo.
-echo 正在添加文件到暂存区...
-git add .
+echo 正在添加所有文件（包括新增、修改和删除的文件）...
+git add -A 2>nul
 
-echo 正在提交代码...
-git commit -m "%commit_msg%"
-
-if %errorlevel% neq 0 (
-    echo 提交失败！可能没有文件需要提交。
+:: 检查是否有文件被添加到暂存区
+git diff --cached --quiet
+if %errorlevel% equ 0 (
+    echo 没有文件需要提交！请确保有修改或新增的文件。
     pause
     exit /b 1
 )
+
+echo 正在提交代码...
+git commit -m "%commit_msg%"
 
 echo 正在拉取远程更新...
 git pull origin %current_branch%
