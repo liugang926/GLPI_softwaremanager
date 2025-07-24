@@ -661,24 +661,32 @@ if (count($software_list) > 0) {
         $is_whitelisted = isset($software['is_whitelisted']) ? (bool)$software['is_whitelisted'] : false;
         $is_blacklisted = isset($software['is_blacklisted']) ? (bool)$software['is_blacklisted'] : false;
 
-        // Display status badges
+        // Display status badges with click-to-remove functionality
         if ($status === 'both' || ($is_whitelisted && $is_blacklisted)) {
-            // Both whitelist and blacklist
-            echo "<span class='badge badge-success' style='margin-right: 5px;'>";
+            // Both whitelist and blacklist - both clickable to remove
+            echo "<span class='badge badge-success clickable-status' style='margin-right: 5px; cursor: pointer;' ";
+            echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"whitelist\")' ";
+            echo "title='" . __('Click to remove from whitelist', 'softwaremanager') . "'>";
             echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
             echo "</span>";
-            echo "<span class='badge badge-danger'>";
+            echo "<span class='badge badge-danger clickable-status' style='cursor: pointer;' ";
+            echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"blacklist\")' ";
+            echo "title='" . __('Click to remove from blacklist', 'softwaremanager') . "'>";
             echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
             echo "</span>";
         } else {
             switch ($status) {
                 case 'whitelist':
-                    echo "<span class='badge badge-success'>";
+                    echo "<span class='badge badge-success clickable-status' style='cursor: pointer;' ";
+                    echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"whitelist\")' ";
+                    echo "title='" . __('Click to remove from whitelist', 'softwaremanager') . "'>";
                     echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
                     echo "</span>";
                     break;
                 case 'blacklist':
-                    echo "<span class='badge badge-danger'>";
+                    echo "<span class='badge badge-danger clickable-status' style='cursor: pointer;' ";
+                    echo "onclick='removeFromStatus(\"" . Html::cleanInputText($software['software_name']) . "\", \"blacklist\")' ";
+                    echo "title='" . __('Click to remove from blacklist', 'softwaremanager') . "'>";
                     echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
                     echo "</span>";
                     break;
@@ -1080,6 +1088,59 @@ function addSingleToList(softwareName, action) {
         document.body.appendChild(form);
         form.submit();
     }
+}
+
+// 处理状态移除功能
+function removeFromStatus(softwareName, statusType) {
+    console.log('removeFromStatus called with:', softwareName, statusType);
+
+    var actionText = statusType === 'whitelist' ? 'whitelist' : 'blacklist';
+    var confirmMessage = 'Are you sure you want to remove "' + softwareName + '" from the ' + actionText + '?';
+
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    // 创建表单数据
+    var formData = new FormData();
+    formData.append('action', 'remove_from_' + statusType);
+    formData.append('software_name', softwareName);
+    formData.append('_glpi_csrf_token', '<?php echo Session::getNewCSRFToken(); ?>');
+
+    // 显示加载状态
+    var statusBadges = document.querySelectorAll('.clickable-status');
+    statusBadges.forEach(function(badge) {
+        if (badge.onclick && badge.onclick.toString().includes(softwareName) && badge.onclick.toString().includes(statusType)) {
+            badge.style.opacity = '0.5';
+            badge.style.pointerEvents = 'none';
+            badge.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Removing...';
+        }
+    });
+
+    // 发送AJAX请求
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.text())
+    .then(data => {
+        console.log('Remove status response:', data);
+        // 刷新页面以显示更新后的状态
+        window.location.reload();
+    })
+    .catch(error => {
+        console.error('Error removing from status:', error);
+        alert('Error removing software from ' + actionText + '. Please try again.');
+        // 恢复按钮状态
+        statusBadges.forEach(function(badge) {
+            if (badge.onclick && badge.onclick.toString().includes(softwareName) && badge.onclick.toString().includes(statusType)) {
+                badge.style.opacity = '1';
+                badge.style.pointerEvents = 'auto';
+                // 恢复原始内容需要重新加载页面
+                window.location.reload();
+            }
+        });
+    });
 }
 
 // DOM ready event handler
