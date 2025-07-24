@@ -28,52 +28,392 @@ if (isset($_POST['action'])) {
     // Handle single software action
     if (isset($_POST['software_name'])) {
         $software_name = Html::cleanInputText($_POST['software_name']);
-        
-        switch ($_POST['action']) {
+        $action_type = $_POST['action'] ?? 'unknown';
+        $user_name = $_SESSION['glpiname'] ?? 'unknown';
+
+        // 记录单个操作日志
+        $operation_name = '';
+        switch ($action_type) {
             case 'add_to_whitelist':
-                if (PluginSoftwaremanagerSoftwareWhitelist::addToList($software_name)) {
-                    // Success message handled by the addToList method
-                }
+                $operation_name = '添加到白名单';
                 break;
             case 'add_to_blacklist':
-                if (PluginSoftwaremanagerSoftwareBlacklist::addToList($software_name)) {
-                    // Success message handled by the addToList method
-                }
+                $operation_name = '添加到黑名单';
                 break;
+            default:
+                $operation_name = '未知操作';
+        }
+
+        $log_message = sprintf(
+            "[Software Manager] 单个操作 - 操作类型: %s, 软件名称: %s, 用户: %s",
+            $operation_name,
+            $software_name,
+            $user_name
+        );
+        Toolbox::logInFile('softwaremanager', $log_message . "\n");
+
+        $result = null;
+        switch ($action_type) {
+            case 'add_to_whitelist':
+                $result = PluginSoftwaremanagerSoftwareWhitelist::addToList($software_name, 'Added by ' . $user_name);
+                break;
+            case 'add_to_blacklist':
+                $result = PluginSoftwaremanagerSoftwareBlacklist::addToList($software_name, 'Added by ' . $user_name);
+                break;
+        }
+
+        // 处理新的返回格式
+        if ($result && is_array($result)) {
+            $success = $result['success'];
+            $action = $result['action'];
+            $record_id = $result['id'];
+
+            // 记录详细的操作结果
+            $action_descriptions = [
+                'created' => '新建成功',
+                'restored' => '恢复成功(之前被删除或禁用)',
+                'already_exists' => '已存在且处于活动状态',
+                'restore_failed' => '恢复失败',
+                'create_failed' => '创建失败'
+            ];
+
+            $action_desc = $action_descriptions[$action] ?? $action;
+            $result_message = sprintf(
+                "[Software Manager] 单个操作结果 - %s: %s, 结果: %s (ID: %s)",
+                $operation_name,
+                $software_name,
+                $action_desc,
+                $record_id ?? 'N/A'
+            );
+            Toolbox::logInFile('softwaremanager', $result_message . "\n");
+
+            // 设置用户反馈消息
+            if ($success) {
+                switch ($action) {
+                    case 'created':
+                        $message = sprintf(__('成功将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, true);
+                        break;
+                    case 'restored':
+                        $message = sprintf(__('成功恢复 "%s" 到%s (之前被删除或禁用)', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, true);
+                        break;
+                }
+            } else {
+                switch ($action) {
+                    case 'already_exists':
+                        $message = sprintf(__('"%s" 已存在于%s中', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, false);
+                        break;
+                    case 'restore_failed':
+                        $message = sprintf(__('无法恢复 "%s" 到%s', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, false);
+                        break;
+                    case 'create_failed':
+                        $message = sprintf(__('无法将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
+                        Session::addMessageAfterRedirect($message, false);
+                        break;
+                }
+            }
+        } else {
+            // 兼容旧的布尔返回值
+            $result_message = sprintf(
+                "[Software Manager] 单个操作结果 - %s: %s, 结果: %s",
+                $operation_name,
+                $software_name,
+                $result ? '成功' : '失败'
+            );
+            Toolbox::logInFile('softwaremanager', $result_message . "\n");
+
+            if ($result) {
+                $message = sprintf(__('成功将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
+                Session::addMessageAfterRedirect($message, true);
+            } else {
+                $message = sprintf(__('无法将 "%s" %s', 'softwaremanager'), $software_name, $operation_name);
+                Session::addMessageAfterRedirect($message, false);
+            }
         }
     }
     
     // Handle batch operations
+
     if (isset($_POST['software_names']) && is_array($_POST['software_names'])) {
         $software_names = $_POST['software_names'];
         $success_count = 0;
+        $failed_count = 0;
+        $skipped_count = 0;
+        $restored_count = 0;
+        $already_exists_count = 0;
         $total_count = count($software_names);
-        
-        foreach ($software_names as $software_name) {
+        $success_items = [];
+        $failed_items = [];
+        $skipped_items = [];
+        $restored_items = [];
+        $already_exists_items = [];
+
+        $action_type = $_POST['action'] ?? 'unknown';
+        $operation_name = '';
+        $target_list = '';
+
+        // 确定操作类型
+        switch ($action_type) {
+            case 'batch_add_to_whitelist':
+            case 'add_to_whitelist':
+                $operation_name = '添加到白名单';
+                $target_list = 'whitelist';
+                break;
+            case 'batch_add_to_blacklist':
+            case 'add_to_blacklist':
+                $operation_name = '添加到黑名单';
+                $target_list = 'blacklist';
+                break;
+            default:
+                $operation_name = '未知操作';
+                $target_list = 'unknown';
+        }
+
+        // 记录操作开始日志
+        $log_message = sprintf(
+            "[Software Manager] 批量操作开始 - 操作类型: %s, 用户: %s, 总项目数: %d",
+            $operation_name,
+            $_SESSION['glpiname'] ?? 'unknown',
+            $total_count
+        );
+        Toolbox::logInFile('softwaremanager', $log_message . "\n");
+
+        foreach ($software_names as $index => $software_name) {
             $software_name = Html::cleanInputText(trim($software_name));
-            if (!empty($software_name)) {
-                                 switch ($_POST['action']) {
-                     case 'batch_add_to_whitelist':
-                         if (PluginSoftwaremanagerSoftwareWhitelist::addToList($software_name, 'Batch added')) {
-                             $success_count++;
-                         }
-                         break;
-                     case 'batch_add_to_blacklist':
-                         if (PluginSoftwaremanagerSoftwareBlacklist::addToList($software_name, 'Batch added')) {
-                             $success_count++;
-                         }
-                         break;
+
+            if (empty($software_name)) {
+                $skipped_count++;
+                $skipped_items[] = "第" . ($index + 1) . "项: 软件名称为空";
+                continue;
+            }
+
+            $result = null;
+            switch ($action_type) {
+                case 'batch_add_to_whitelist':
+                case 'add_to_whitelist':
+                    $result = PluginSoftwaremanagerSoftwareWhitelist::addToList($software_name, 'Batch added by ' . ($_SESSION['glpiname'] ?? 'unknown'));
+                    break;
+                case 'batch_add_to_blacklist':
+                case 'add_to_blacklist':
+                    $result = PluginSoftwaremanagerSoftwareBlacklist::addToList($software_name, 'Batch added by ' . ($_SESSION['glpiname'] ?? 'unknown'));
+                    break;
+            }
+
+            // 处理新的返回格式
+            if ($result && is_array($result)) {
+                $success = $result['success'];
+                $action = $result['action'];
+
+                if ($success) {
+                    if ($action === 'created') {
+                        $success_count++;
+                        $success_items[] = $software_name . " (新建)";
+                    } elseif ($action === 'restored') {
+                        $restored_count++;
+                        $restored_items[] = $software_name . " (恢复)";
+                    }
+                } else {
+                    switch ($action) {
+                        case 'already_exists':
+                            $already_exists_count++;
+                            $already_exists_items[] = $software_name . " (已存在)";
+                            break;
+                        case 'restore_failed':
+                            $failed_count++;
+                            $failed_items[] = $software_name . " (恢复失败)";
+                            break;
+                        case 'create_failed':
+                            $failed_count++;
+                            $failed_items[] = $software_name . " (创建失败)";
+                            break;
+                        default:
+                            $failed_count++;
+                            $failed_items[] = $software_name . " (未知错误)";
+                    }
+                }
+            } else {
+                // 兼容旧的布尔返回值
+                if ($result) {
+                    $success_count++;
+                    $success_items[] = $software_name;
+                } else {
+                    $already_exists_count++;
+                    $already_exists_items[] = $software_name . " (可能已存在)";
                 }
             }
         }
         
-        if ($success_count > 0) {
-            $message = sprintf(__('%d out of %d software items processed successfully', 'softwaremanager'), $success_count, $total_count);
+        // 记录操作结果日志
+        $log_details = sprintf(
+            "[Software Manager] 批量操作完成 - 操作类型: %s, 总数: %d, 新建: %d, 恢复: %d, 已存在: %d, 失败: %d, 跳过: %d",
+            $operation_name,
+            $total_count,
+            $success_count,
+            $restored_count,
+            $already_exists_count,
+            $failed_count,
+            $skipped_count
+        );
+
+        if (!empty($success_items)) {
+            $log_details .= "\n新建项目: " . implode(', ', $success_items);
+        }
+        if (!empty($restored_items)) {
+            $log_details .= "\n恢复项目: " . implode(', ', $restored_items);
+        }
+        if (!empty($already_exists_items)) {
+            $log_details .= "\n已存在项目: " . implode(', ', $already_exists_items);
+        }
+        if (!empty($failed_items)) {
+            $log_details .= "\n失败项目: " . implode(', ', $failed_items);
+        }
+        if (!empty($skipped_items)) {
+            $log_details .= "\n跳过项目: " . implode(', ', $skipped_items);
+        }
+
+        Toolbox::logInFile('softwaremanager', $log_details . "\n");
+
+        // 显示详细的操作结果
+        $total_success = $success_count + $restored_count;
+        $result_color = ($failed_count == 0 && $skipped_count == 0) ? '#4caf50' :
+                       ($total_success > 0 ? '#ff9800' : '#f44336');
+
+        echo "<div style='background: $result_color; color: white; padding: 20px; margin: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>";
+        echo "<h3><i class='fas fa-chart-bar'></i> 批量操作结果统计</h3>";
+        echo "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 15px 0;'>";
+
+        echo "<div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;'>";
+        echo "<div style='font-size: 24px; font-weight: bold;'>$total_count</div>";
+        echo "<div>总处理项目</div>";
+        echo "</div>";
+
+        echo "<div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;'>";
+        echo "<div style='font-size: 24px; font-weight: bold; color: #c8e6c9;'>$success_count</div>";
+        echo "<div>新建成功</div>";
+        echo "</div>";
+
+        echo "<div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;'>";
+        echo "<div style='font-size: 24px; font-weight: bold; color: #b3e5fc;'>$restored_count</div>";
+        echo "<div>恢复成功</div>";
+        echo "</div>";
+
+        echo "<div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;'>";
+        echo "<div style='font-size: 24px; font-weight: bold; color: #ffe0b2;'>$already_exists_count</div>";
+        echo "<div>已存在</div>";
+        echo "</div>";
+
+        echo "<div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;'>";
+        echo "<div style='font-size: 24px; font-weight: bold; color: #ffcdd2;'>$failed_count</div>";
+        echo "<div>处理失败</div>";
+        echo "</div>";
+
+        echo "<div style='background: rgba(255,255,255,0.2); padding: 10px; border-radius: 5px;'>";
+        echo "<div style='font-size: 24px; font-weight: bold; color: #f5f5f5;'>$skipped_count</div>";
+        echo "<div>跳过项目</div>";
+        echo "</div>";
+
+        echo "</div>";
+        echo "<p><strong>操作类型:</strong> $operation_name</p>";
+        echo "<p><strong>执行时间:</strong> " . date('Y-m-d H:i:s') . "</p>";
+        echo "<p><strong>有效处理率:</strong> " . ($total_count > 0 ? round((($total_success + $already_exists_count) / $total_count) * 100, 1) : 0) . "%</p>";
+        echo "</div>";
+
+        // 显示详细列表（如果有已存在、失败或跳过的项目）
+        if (!empty($already_exists_items) || !empty($failed_items) || !empty($skipped_items)) {
+            echo "<div style='background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; margin: 15px; border-radius: 5px;'>";
+            echo "<h4><i class='fas fa-info-circle'></i> 详细信息</h4>";
+
+            if (!empty($already_exists_items)) {
+                echo "<div style='margin-bottom: 15px;'>";
+                echo "<strong style='color: #856404;'>已存在的项目 ($already_exists_count 个):</strong>";
+                echo "<ul style='margin: 5px 0; padding-left: 20px; columns: 2; column-gap: 20px;'>";
+                foreach ($already_exists_items as $item) {
+                    echo "<li style='color: #856404; break-inside: avoid;'>$item</li>";
+                }
+                echo "</ul>";
+                echo "</div>";
+            }
+
+            if (!empty($failed_items)) {
+                echo "<div style='margin-bottom: 15px;'>";
+                echo "<strong style='color: #d63031;'>处理失败的项目 ($failed_count 个):</strong>";
+                echo "<ul style='margin: 5px 0; padding-left: 20px;'>";
+                foreach ($failed_items as $item) {
+                    echo "<li style='color: #d63031;'>$item</li>";
+                }
+                echo "</ul>";
+                echo "</div>";
+            }
+
+            if (!empty($skipped_items)) {
+                echo "<div>";
+                echo "<strong style='color: #e17055;'>跳过的项目 ($skipped_count 个):</strong>";
+                echo "<ul style='margin: 5px 0; padding-left: 20px;'>";
+                foreach ($skipped_items as $item) {
+                    echo "<li style='color: #e17055;'>$item</li>";
+                }
+                echo "</ul>";
+                echo "</div>";
+            }
+            echo "</div>";
+        }
+
+        // 显示成功项目列表（如果有成功的项目）
+        if (!empty($success_items) || !empty($restored_items)) {
+            echo "<div style='background: #d4edda; border: 1px solid #c3e6cb; padding: 15px; margin: 15px; border-radius: 5px;'>";
+            echo "<h4><i class='fas fa-check-circle'></i> 成功处理的项目 (" . ($success_count + $restored_count) . " 个)</h4>";
+            echo "<div style='max-height: 300px; overflow-y: auto;'>";
+
+            if (!empty($success_items)) {
+                echo "<div style='margin-bottom: 15px;'>";
+                echo "<h5 style='color: #155724; margin-bottom: 10px;'><i class='fas fa-plus-circle'></i> 新建项目 ($success_count 个):</h5>";
+                echo "<ul style='margin: 5px 0; padding-left: 20px; columns: 2; column-gap: 20px;'>";
+                foreach ($success_items as $item) {
+                    echo "<li style='color: #155724; break-inside: avoid;'>$item</li>";
+                }
+                echo "</ul>";
+                echo "</div>";
+            }
+
+            if (!empty($restored_items)) {
+                echo "<div>";
+                echo "<h5 style='color: #0c5460; margin-bottom: 10px;'><i class='fas fa-undo'></i> 恢复项目 ($restored_count 个):</h5>";
+                echo "<ul style='margin: 5px 0; padding-left: 20px; columns: 2; column-gap: 20px;'>";
+                foreach ($restored_items as $item) {
+                    echo "<li style='color: #0c5460; break-inside: avoid;'>$item</li>";
+                }
+                echo "</ul>";
+                echo "</div>";
+            }
+
+            echo "</div>";
+            echo "</div>";
+        }
+
+        // 设置会话消息
+        if ($success_count > 0 || $restored_count > 0 || $already_exists_count > 0) {
+            $message = sprintf(
+                __('批量操作完成: 总共 %d 项，新建 %d 项，恢复 %d 项，已存在 %d 项，失败 %d 项，跳过 %d 项', 'softwaremanager'),
+                $total_count, $success_count, $restored_count, $already_exists_count, $failed_count, $skipped_count
+            );
             Session::addMessageAfterRedirect($message, true);
         }
+
+        // 延迟重定向，让用户看到详细结果
+        echo "<div style='background: #17a2b8; color: white; padding: 15px; margin: 15px; border-radius: 5px; text-align: center;'>";
+        echo "<i class='fas fa-info-circle'></i> ";
+        echo "页面将在8秒后自动刷新，或者 <a href='" . $_SERVER['PHP_SELF'] . "' style='color: #fff3cd; text-decoration: underline;'>点击这里立即刷新</a>";
+        echo "</div>";
+        echo "<script>setTimeout(function(){ window.location.href = '" . $_SERVER['PHP_SELF'] . "'; }, 8000);</script>";
     }
-    
-    Html::redirect($_SERVER['PHP_SELF']);
+
+    // Only redirect if no batch operation was performed
+    if (!empty($_POST) && !isset($_POST['software_names'])) {
+        Html::redirect($_SERVER['PHP_SELF']);
+    }
 }
 
 // Get parameters for search and pagination
@@ -256,7 +596,7 @@ if (count($software_list) > 0) {
     echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' id='batch-form'>";
     // 添加CSRF安全令牌
     echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-    echo Html::hidden('action', ['value' => '', 'id' => 'batch_action']);
+    echo Html::hidden('action', ['value' => '']);
 
     // Batch operations toolbar - moved to top
     echo "<div class='batch-operations-toolbar' style='margin-bottom: 15px; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;'>";
@@ -305,28 +645,49 @@ if (count($software_list) > 0) {
         echo "</a>";
         echo "</td>";
         
-        echo "<td>" . Html::cleanInputText($software['version'] ?? '-') . "</td>";
+        // Format version display - limit length and show tooltip for long version lists
+        $version_text = $software['version'] ?? '-';
+        if (strlen($version_text) > 50) {
+            $short_version = substr($version_text, 0, 47) . '...';
+            echo "<td title='" . Html::cleanInputText($version_text) . "'>" . Html::cleanInputText($short_version) . "</td>";
+        } else {
+            echo "<td>" . Html::cleanInputText($version_text) . "</td>";
+        }
         echo "<td>" . Html::cleanInputText($software['manufacturer'] ?? '-') . "</td>";
 
         // Status column
         echo "<td>";
         $status = $software['status'] ?? 'unmanaged';
-        switch ($status) {
-            case 'whitelist':
-                echo "<span class='badge badge-success'>";
-                echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
-                echo "</span>";
-                break;
-            case 'blacklist':
-                echo "<span class='badge badge-danger'>";
-                echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
-                echo "</span>";
-                break;
-            default:
-                echo "<span class='badge badge-secondary'>";
-                echo "<i class='fas fa-question'></i> " . __('Unmanaged', 'softwaremanager');
-                echo "</span>";
-                break;
+        $is_whitelisted = isset($software['is_whitelisted']) ? (bool)$software['is_whitelisted'] : false;
+        $is_blacklisted = isset($software['is_blacklisted']) ? (bool)$software['is_blacklisted'] : false;
+
+        // Display status badges
+        if ($status === 'both' || ($is_whitelisted && $is_blacklisted)) {
+            // Both whitelist and blacklist
+            echo "<span class='badge badge-success' style='margin-right: 5px;'>";
+            echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
+            echo "</span>";
+            echo "<span class='badge badge-danger'>";
+            echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
+            echo "</span>";
+        } else {
+            switch ($status) {
+                case 'whitelist':
+                    echo "<span class='badge badge-success'>";
+                    echo "<i class='fas fa-check'></i> " . __('Whitelist', 'softwaremanager');
+                    echo "</span>";
+                    break;
+                case 'blacklist':
+                    echo "<span class='badge badge-danger'>";
+                    echo "<i class='fas fa-times'></i> " . __('Blacklist', 'softwaremanager');
+                    echo "</span>";
+                    break;
+                default:
+                    echo "<span class='badge badge-secondary'>";
+                    echo "<i class='fas fa-question'></i> " . __('Unmanaged', 'softwaremanager');
+                    echo "</span>";
+                    break;
+            }
         }
         echo "</td>";
 
@@ -363,25 +724,15 @@ if (count($software_list) > 0) {
         echo "</td>";
         echo "<td>";
 
-        // Add to whitelist button
-        echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline;'>";
-        echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-        echo Html::hidden('action', ['value' => 'add_to_whitelist']);
-        echo Html::hidden('software_name', ['value' => $software['software_name']]);
-        echo "<button type='submit' class='btn btn-sm btn-success' title='Add to Whitelist'>";
+        // Add to whitelist button - 使用JavaScript提交，避免表单嵌套
+        echo "<button type='button' class='btn btn-sm btn-success' title='Add to Whitelist' onclick='addSingleToList(\"" . htmlspecialchars($software['software_name'], ENT_QUOTES) . "\", \"add_to_whitelist\")'>";
         echo "<i class='fas fa-check'></i>";
-        echo "</button>";
-        echo "</form> ";
+        echo "</button> ";
 
-        // Add to blacklist button
-        echo "<form method='POST' action='" . $_SERVER['PHP_SELF'] . "' style='display: inline;'>";
-        echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-        echo Html::hidden('action', ['value' => 'add_to_blacklist']);
-        echo Html::hidden('software_name', ['value' => $software['software_name']]);
-        echo "<button type='submit' class='btn btn-sm btn-danger' title='Add to Blacklist'>";
+        // Add to blacklist button - 使用JavaScript提交，避免表单嵌套
+        echo "<button type='button' class='btn btn-sm btn-danger' title='Add to Blacklist' onclick='addSingleToList(\"" . htmlspecialchars($software['software_name'], ENT_QUOTES) . "\", \"add_to_blacklist\")'>";
         echo "<i class='fas fa-times'></i>";
-        echo "</button>";
-        echo "</form> ";
+        echo "</button> ";
 
         // Details button
         echo "<button type='button' class='btn btn-sm btn-info' onclick='showSoftwareDetails(" . $software['software_id'] . ")' title='View Details'>";
@@ -664,16 +1015,70 @@ function updateBatchButtons() {
 }
 
 function performBatchAction(action) {
+    console.log('performBatchAction called with action:', action);
     var checkedBoxes = document.querySelectorAll('.software_select:checked');
+    console.log('Found checked boxes:', checkedBoxes.length);
+
     if (checkedBoxes.length === 0) {
         alert('Please select at least one software item.');
         return;
     }
-    
+
     var actionText = action === 'batch_add_to_whitelist' ? 'whitelist' : 'blacklist';
     if (confirm('Are you sure you want to add ' + checkedBoxes.length + ' selected software items to the ' + actionText + '?')) {
-        document.getElementById('batch_action').value = action;
-        document.getElementById('batch-form').submit();
+        var batchForm = document.getElementById('batch-form');
+        var batchActionField = batchForm.querySelector('input[name="action"]');
+
+        console.log('batch-form:', batchForm);
+        console.log('batch_action field:', batchActionField);
+
+        if (batchActionField && batchForm) {
+            batchActionField.value = action;
+            console.log('Setting action field to:', action);
+            console.log('Action field value after setting:', batchActionField.value);
+            batchForm.submit();
+        } else {
+            console.error('Could not find batch_action field or batch-form');
+            alert('Error: Form elements not found. Please refresh the page and try again.');
+        }
+    }
+}
+
+// 处理单个软件添加到白名单/黑名单的函数
+function addSingleToList(softwareName, action) {
+    console.log('addSingleToList called with:', softwareName, action);
+
+    var actionText = action === 'add_to_whitelist' ? 'whitelist' : 'blacklist';
+    if (confirm('Are you sure you want to add "' + softwareName + '" to the ' + actionText + '?')) {
+        // 创建一个临时表单来提交单个操作
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = window.location.href;
+
+        // 添加CSRF令牌
+        var csrfToken = document.createElement('input');
+        csrfToken.type = 'hidden';
+        csrfToken.name = '_glpi_csrf_token';
+        csrfToken.value = document.querySelector('input[name="_glpi_csrf_token"]').value;
+        form.appendChild(csrfToken);
+
+        // 添加action
+        var actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = action;
+        form.appendChild(actionInput);
+
+        // 添加软件名称
+        var nameInput = document.createElement('input');
+        nameInput.type = 'hidden';
+        nameInput.name = 'software_name';
+        nameInput.value = softwareName;
+        form.appendChild(nameInput);
+
+        // 提交表单
+        document.body.appendChild(form);
+        form.submit();
     }
 }
 

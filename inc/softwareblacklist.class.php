@@ -90,26 +90,60 @@ class PluginSoftwaremanagerSoftwareBlacklist extends CommonDBTM
     /**
      * Static method to add software to blacklist
      * 保留这个静态方法用于向后兼容
+     *
+     * @param string $software_name 软件名称
+     * @param string $comment 备注
+     * @return array 返回操作结果 ['success' => bool, 'action' => string, 'id' => int|null]
      */
     static function addToList($software_name, $comment = '') {
         $blacklist = new self();
 
         // 检查是否已存在 - 使用正确的字段名 'name'
         $existing = $blacklist->find(['name' => $software_name]);
+
         if (!empty($existing)) {
-            return false; // 已存在
+            // 记录存在，检查其状态
+            $record = reset($existing); // 获取第一条记录
+            $record_id = $record['id'];
+
+            // 检查记录是否被删除或非活动状态
+            if ($record['is_deleted'] == 1 || $record['is_active'] == 0) {
+                // 恢复记录：设置为活动状态且未删除
+                $update_data = [
+                    'id' => $record_id,
+                    'is_active' => 1,
+                    'is_deleted' => 0,
+                    'comment' => $comment, // 更新备注
+                    'date_mod' => date('Y-m-d H:i:s')
+                ];
+
+                if ($blacklist->update($update_data)) {
+                    return ['success' => true, 'action' => 'restored', 'id' => $record_id];
+                } else {
+                    return ['success' => false, 'action' => 'restore_failed', 'id' => $record_id];
+                }
+            } else {
+                // 记录存在且处于活动状态
+                return ['success' => false, 'action' => 'already_exists', 'id' => $record_id];
+            }
         }
 
-        // 使用父类的add方法添加新记录 - 使用正确的字段名 'name'
+        // 记录不存在，创建新记录
         $input = [
             'name' => $software_name,
             'comment' => $comment,
             'is_active' => 1,
+            'is_deleted' => 0,
             'date_creation' => date('Y-m-d H:i:s'),
             'date_mod' => date('Y-m-d H:i:s')
         ];
 
-        return $blacklist->add($input);
+        $new_id = $blacklist->add($input);
+        if ($new_id) {
+            return ['success' => true, 'action' => 'created', 'id' => $new_id];
+        } else {
+            return ['success' => false, 'action' => 'create_failed', 'id' => null];
+        }
     }
 
     /**

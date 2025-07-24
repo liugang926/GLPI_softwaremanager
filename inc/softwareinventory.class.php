@@ -39,18 +39,21 @@ class PluginSoftwaremanagerSoftwareInventory extends CommonDBTM {
         $sort = in_array($sort, $valid_sorts) ? $sort : 'name';
         $order = (strtoupper($order) === 'DESC') ? 'DESC' : 'ASC';
 
-        // Build SQL query
-        $sql = "SELECT DISTINCT
-                s.id as software_id,
+        // Build SQL query - Group by software name to combine versions
+        $sql = "SELECT
+                MIN(s.id) as software_id,
                 s.name as software_name,
-                COALESCE(sv.name, '') as version,
+                GROUP_CONCAT(DISTINCT COALESCE(sv.name, '') ORDER BY sv.name SEPARATOR ', ') as version,
                 COALESCE(m.name, '') as manufacturer,
                 COUNT(DISTINCT isv.items_id) as computer_count,
                 CASE
+                    WHEN w.id IS NOT NULL AND w.is_active = 1 AND b.id IS NOT NULL AND b.is_active = 1 THEN 'both'
                     WHEN w.id IS NOT NULL AND w.is_active = 1 THEN 'whitelist'
                     WHEN b.id IS NOT NULL AND b.is_active = 1 THEN 'blacklist'
                     ELSE 'unmanaged'
-                END as status
+                END as status,
+                CASE WHEN w.id IS NOT NULL AND w.is_active = 1 THEN 1 ELSE 0 END as is_whitelisted,
+                CASE WHEN b.id IS NOT NULL AND b.is_active = 1 THEN 1 ELSE 0 END as is_blacklisted
             FROM glpi_softwares s
             LEFT JOIN glpi_manufacturers m ON (m.id = s.manufacturers_id)
             LEFT JOIN glpi_softwareversions sv ON (sv.softwares_id = s.id)
@@ -99,7 +102,7 @@ class PluginSoftwaremanagerSoftwareInventory extends CommonDBTM {
                 }
             }
 
-            $sql .= " GROUP BY s.id, s.name, sv.name, m.name";
+            $sql .= " GROUP BY s.name, m.name";
 
             // Add sorting
             switch ($sort) {
@@ -149,7 +152,7 @@ class PluginSoftwaremanagerSoftwareInventory extends CommonDBTM {
         $search = Html::cleanInputText($search);
         $manufacturer = intval($manufacturer);
 
-            $sql = "SELECT COUNT(DISTINCT s.id) as total
+            $sql = "SELECT COUNT(DISTINCT s.name) as total
                    FROM glpi_softwares s
                    LEFT JOIN glpi_manufacturers m ON (m.id = s.manufacturers_id)
             LEFT JOIN " . PluginSoftwaremanagerSoftwareWhitelist::getTable() . " w ON (
@@ -378,6 +381,7 @@ class PluginSoftwaremanagerSoftwareInventory extends CommonDBTM {
             'total' => 0,
             'whitelist' => 0,
             'blacklist' => 0,
+            'both' => 0,
             'unmanaged' => 0
         ];
 
@@ -392,32 +396,29 @@ class PluginSoftwaremanagerSoftwareInventory extends CommonDBTM {
                 $stats['total'] = intval($row['total']);
             }
 
-            // Get whitelist count
-        $sql_whitelist = "SELECT COUNT(DISTINCT s.id) as whitelist_count
-                             FROM glpi_softwares s
-                         INNER JOIN " . PluginSoftwaremanagerSoftwareWhitelist::getTable() . " w ON w.name = s.name 
-                         WHERE s.is_deleted = 0 AND w.is_active = 1";
+            // Get detailed counts using the same logic as the main query
+        $sql_counts = "SELECT
+                COUNT(DISTINCT CASE WHEN w.id IS NOT NULL AND w.is_active = 1 THEN s.id END) as whitelist_count,
+                COUNT(DISTINCT CASE WHEN b.id IS NOT NULL AND b.is_active = 1 THEN s.id END) as blacklist_count,
+                COUNT(DISTINCT CASE WHEN w.id IS NOT NULL AND w.is_active = 1 AND b.id IS NOT NULL AND b.is_active = 1 THEN s.id END) as both_count,
+                COUNT(DISTINCT CASE WHEN w.id IS NULL AND b.id IS NULL THEN s.id END) as unmanaged_count
+            FROM glpi_softwares s
+            LEFT JOIN " . PluginSoftwaremanagerSoftwareWhitelist::getTable() . " w ON (
+                w.name = s.name AND w.is_active = 1
+            )
+            LEFT JOIN " . PluginSoftwaremanagerSoftwareBlacklist::getTable() . " b ON (
+                b.name = s.name AND b.is_active = 1
+            )
+            WHERE s.is_deleted = 0";
 
-        $result = $DB->query($sql_whitelist);
+        $result = $DB->query($sql_counts);
         if ($result) {
             $row = $DB->fetchAssoc($result);
-                $stats['whitelist'] = intval($row['whitelist_count']);
+            $stats['whitelist'] = intval($row['whitelist_count']);
+            $stats['blacklist'] = intval($row['blacklist_count']);
+            $stats['both'] = intval($row['both_count']);
+            $stats['unmanaged'] = intval($row['unmanaged_count']);
             }
-
-            // Get blacklist count
-        $sql_blacklist = "SELECT COUNT(DISTINCT s.id) as blacklist_count
-                             FROM glpi_softwares s
-                         INNER JOIN " . PluginSoftwaremanagerSoftwareBlacklist::getTable() . " b ON b.name = s.name 
-                         WHERE s.is_deleted = 0 AND b.is_active = 1";
-
-        $result = $DB->query($sql_blacklist);
-        if ($result) {
-            $row = $DB->fetchAssoc($result);
-                $stats['blacklist'] = intval($row['blacklist_count']);
-            }
-
-            // Calculate unmanaged count
-            $stats['unmanaged'] = $stats['total'] - $stats['whitelist'] - $stats['blacklist'];
 
         return $stats;
     }
