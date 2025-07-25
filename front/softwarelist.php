@@ -9,11 +9,8 @@
 
 include('../../../inc/includes.php');
 
-// Check rights - temporarily allow authenticated users, will add proper rights later
-if (!Session::getLoginUserID()) {
-    Html::redirect($CFG_GLPI["root_doc"] . "/index.php");
-    exit();
-}
+// Check rights - using standard GLPI permissions
+Session::checkRight('config', READ);
 
 Html::header(__('Software Manager', 'softwaremanager'), $_SERVER['PHP_SELF'], 'admin', 'PluginSoftwaremanagerMenu');
 

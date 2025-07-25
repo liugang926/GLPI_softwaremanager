@@ -9,8 +9,8 @@
 
 include('../../../inc/includes.php');
 
-// Check CSRF token
-Session::checkCSRF();
+// CSRF token is automatically checked by GLPI when csrf_compliant = true
+// No manual CSRF check needed
 
 // Check rights - allow access for authenticated users
 if (!Session::getLoginUserID()) {

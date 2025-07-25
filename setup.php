@@ -19,33 +19,26 @@ define('PLUGIN_SOFTWAREMANAGER_MAX_GLPI', '10.1.0');
 function plugin_init_softwaremanager() {
     global $PLUGIN_HOOKS;
 
-    // Include required class files first
-    include_once(__DIR__ . '/inc/profile.class.php');
-    include_once(__DIR__ . '/inc/menu.class.php');
-    include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
-    include_once(__DIR__ . '/inc/softwareblacklist.class.php');
-    include_once(__DIR__ . '/inc/softwareinventory.class.php');
-
     // Required for CSRF protection - must be true for installation
     $PLUGIN_HOOKS['csrf_compliant']['softwaremanager'] = true;
 
-    // Plugin information - register profile class according to official documentation
-    Plugin::registerClass('PluginSoftwaremanagerProfile', [
-        'addtabon' => 'Profile'
-    ]);
-
-    // Register software list class for search interface
-    Plugin::registerClass('PluginSoftwaremanagerSoftwareList');
-
-    // Add rights to session when profile changes
-    $PLUGIN_HOOKS['change_profile']['softwaremanager'] = ['PluginSoftwaremanagerProfile', 'changeProfile'];
-
-    // Check if user can access plugin - temporarily allow all authenticated users
+    // Check if user can access plugin
     if (isset($_SESSION['glpiID']) && $_SESSION['glpiID']) {
-        $can_access = true;  // Temporarily allow all authenticated users
-        
-        // TODO: Implement proper permission checking later
-        // For now, all authenticated users can access the plugin
+        // Include required class files only when needed
+        include_once(__DIR__ . '/inc/menu.class.php');
+
+        // Check if user has access permissions
+        $can_access = false;
+
+        // Super-Admin always has access
+        if (isset($_SESSION['glpiactiveprofile']['name']) && $_SESSION['glpiactiveprofile']['name'] == 'Super-Admin') {
+            $can_access = true;
+        } else {
+            // Check standard GLPI rights for now
+            if (Session::haveRight('config', READ)) {
+                $can_access = true;
+            }
+        }
 
         if ($can_access) {
             // Add to menu
@@ -132,23 +125,35 @@ function plugin_softwaremanager_check_config($verbose = false) {
  * @return boolean
  */
 function plugin_softwaremanager_install() {
-    // Include required class files
-    include_once(__DIR__ . '/inc/profile.class.php');
-    include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
-    include_once(__DIR__ . '/inc/softwareblacklist.class.php');
+    try {
+        // Include required class files
+        include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
+        include_once(__DIR__ . '/inc/softwareblacklist.class.php');
+        include_once(__DIR__ . '/inc/scanhistory.class.php');
+        include_once(__DIR__ . '/inc/scanresult.class.php');
 
-    // Initialize database tables
-    $migration = new Migration(PLUGIN_SOFTWAREMANAGER_VERSION);
+        // Initialize database tables
+        $migration = new Migration(PLUGIN_SOFTWAREMANAGER_VERSION);
 
-    // Initialize profile rights
-    PluginSoftwaremanagerProfile::initProfile();
-    
-    // Create database tables
-    PluginSoftwaremanagerSoftwareWhitelist::install($migration);
-    PluginSoftwaremanagerSoftwareBlacklist::install($migration);
+        // Create database tables
+        PluginSoftwaremanagerSoftwareWhitelist::install($migration);
+        PluginSoftwaremanagerSoftwareBlacklist::install($migration);
+        PluginSoftwaremanagerScanhistory::install($migration);
+        PluginSoftwaremanagerScanresult::install($migration);
 
-    $migration->executeMigration();
-    return true;
+        $migration->executeMigration();
+
+        // Register plugin rights following GLPI plugin development documentation
+        // Note: Rights registration will be handled by GLPI's profile system
+        // For now, we'll rely on existing GLPI rights like 'config' for access control
+
+        return true;
+
+    } catch (Exception $e) {
+        // Log error for debugging
+        error_log("Software Manager Plugin installation failed: " . $e->getMessage());
+        return false;
+    }
 }
 
 /**
@@ -157,21 +162,24 @@ function plugin_softwaremanager_install() {
  * @return boolean
  */
 function plugin_softwaremanager_uninstall() {
-    // Include required class files
-    include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
-    include_once(__DIR__ . '/inc/softwareblacklist.class.php');
+    try {
+        // Include required class files
+        include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
+        include_once(__DIR__ . '/inc/softwareblacklist.class.php');
+        include_once(__DIR__ . '/inc/scanhistory.class.php');
+        include_once(__DIR__ . '/inc/scanresult.class.php');
 
-    // Drop database tables
-    PluginSoftwaremanagerSoftwareWhitelist::uninstall();
-    PluginSoftwaremanagerSoftwareBlacklist::uninstall();
+        // Drop database tables
+        PluginSoftwaremanagerSoftwareWhitelist::uninstall();
+        PluginSoftwaremanagerSoftwareBlacklist::uninstall();
+        PluginSoftwaremanagerScanhistory::uninstall();
+        PluginSoftwaremanagerScanresult::uninstall();
 
-    // Remove rights
-    $plugin_name = 'softwaremanager';
-    $rights = ['config', 'lists', 'software', 'scan'];
-    
-    foreach ($rights as $right) {
-        ProfileRight::deleteProfileRights([$plugin_name . '_' . $right]);
+        return true;
+
+    } catch (Exception $e) {
+        // Log error for debugging
+        error_log("Software Manager Plugin uninstallation failed: " . $e->getMessage());
+        return false;
     }
-    
-    return true;
 }

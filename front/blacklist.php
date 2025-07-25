@@ -12,8 +12,8 @@ include('../../../inc/includes.php'); // 确保在最开始加载核心环境
 // 声明全局变量
 global $CFG_GLPI;
 
-// 检查用户权限
-Session::checkRight("config", UPDATE);
+// 检查用户权限 - using standard GLPI permissions
+Session::checkRight('config', UPDATE);
 
 // ----------------- POST 请求处理逻辑 -----------------
 // 必须在页面渲染之前处理POST请求

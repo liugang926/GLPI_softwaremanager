@@ -107,8 +107,8 @@ class PluginSoftwaremanagerMenu extends CommonGLPI {
             return true;
         }
 
-        // For now, allow all authenticated users
-        return isset($_SESSION['glpiactiveprofile']);
+        // Check if user has config rights (standard GLPI permission)
+        return Session::haveRight('config', READ);
     }
 
     /**
