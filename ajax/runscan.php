@@ -1,67 +1,81 @@
 <?php
 /**
  * AJAX endpoint to run a new software scan.
- * --- FINAL VERSION WITH GLPI_AJAX DECLARED ---
  */
 
-// 1. 在加载任何GLPI文件之前，首先定义这是一个AJAX请求
-define('GLPI_AJAX', true);
+include('../../../inc/includes.php');
 
-// 2. 现在，正常加载GLPI的标准环境
-include ('../../../inc/includes.php');
-global $DB;
+// 检查用户登录
+Session::checkLoginUser();
 
-// 2. 调试日志记录 (我们暂时保留它以确认问题解决)
-$sent_token   = $_POST['_glpi_csrf_token'] ?? 'TOKEN NOT SENT BY CLIENT';
-$server_token = $_SESSION['glpi_csrf_token'] ?? 'SERVER TOKEN NOT SET';
+// 检查 CSRF 令牌 - 使用正确的 GLPI 方式
+Session::checkCSRF();
 
-// -- 这里是修正过的关键行 --
-$user_id = Session::getLoginUserID() ?? 'USER NOT LOGGED IN'; // 使用 getLoginUserID
-
-$log_message = sprintf(
-    "[%s] RUNSCAN DEBUG: UserID=%s | SentToken=%s | ServerToken=%s\n",
-    date('Y-m-d H:i:s'),
-    $user_id,
-    $sent_token,
-    $server_token
-);
-
-if (is_writable(GLPI_LOG_DIR) && is_dir(GLPI_LOG_DIR)) {
-    file_put_contents(GLPI_LOG_DIR . '/php-errors.log', $log_message, FILE_APPEND);
-}
-
-// 3. 执行CSRF检查
-if (!Session::checkCSRFToken($sent_token)) {
-    http_response_code(403); // 使用 403 Forbidden 更准确
-    header('Content-Type: application/json');
-    // 在返回的JSON中也包含这两个令牌，方便在浏览器中直接对比
-    echo json_encode([
-        'error'        => 'CSRF Token Mismatch. See server log for details (files/_log/php-errors.log).',
-        'sent_token'   => $sent_token,
-        'server_token' => $server_token
-    ]);
-    exit();
-}
-
-// 4. 如果检查通过，执行核心逻辑 (这部分代码不变)
+// 简化的扫描逻辑：基于现有软件列表数据创建审计快照
 try {
-    $scan_query = "SELECT * FROM `glpi_computers` WHERE `is_deleted` = 0";
-    $computers_to_scan = $DB->request($scan_query);
-    $count = count($computers_to_scan);
+    global $DB;
+
+    // 直接计算统计数据（简化版本）
+    $total_software = 0;
+    $whitelist_count = 0;
+    $blacklist_count = 0;
+    $unmanaged_count = 0;
+
+    // 获取软件总数
+    $software_query = "SELECT COUNT(*) as total FROM `glpi_softwares` WHERE `is_deleted` = 0";
+    $result = $DB->query($software_query);
+    if ($result && $row = $DB->fetchAssoc($result)) {
+        $total_software = (int)$row['total'];
+    }
+
+    // 获取白名单数量
+    $whitelist_query = "SELECT COUNT(*) as count FROM `glpi_plugin_softwaremanager_softwarewhitelists`";
+    $result = $DB->query($whitelist_query);
+    if ($result && $row = $DB->fetchAssoc($result)) {
+        $whitelist_count = (int)$row['count'];
+    }
+
+    // 获取黑名单数量
+    $blacklist_query = "SELECT COUNT(*) as count FROM `glpi_plugin_softwaremanager_softwareblacklists`";
+    $result = $DB->query($blacklist_query);
+    if ($result && $row = $DB->fetchAssoc($result)) {
+        $blacklist_count = (int)$row['count'];
+    }
+
+    // 计算未管理数量
+    $unmanaged_count = $total_software - $whitelist_count - $blacklist_count;
+    if ($unmanaged_count < 0) $unmanaged_count = 0;
+
+    // 创建扫描历史记录（审计快照）
+    $scan_time = date('Y-m-d H:i:s');
+    $user_id = Session::getLoginUserID();
+
+    $insert_query = "INSERT INTO `glpi_plugin_softwaremanager_scanhistories`
+                     (`user_id`, `scan_time`, `total_software`, `whitelist_count`, `blacklist_count`, `unmanaged_count`)
+                     VALUES ('$user_id', '$scan_time', '$total_software', '$whitelist_count', '$blacklist_count', '$unmanaged_count')";
+
+    $result = $DB->query($insert_query);
+    $scan_id = $DB->insertId();
 
     header('Content-Type: application/json');
     echo json_encode([
         'success' => true,
-        'message' => "CSRF Check Passed! Scan task started for " . $count . " computers."
+        'message' => "审计快照已创建！总计 {$total_software} 个软件，白名单 {$whitelist_count} 个，黑名单 {$blacklist_count} 个，未管理 {$unmanaged_count} 个。",
+        'scan_id' => $scan_id,
+        'stats' => [
+            'total_software' => $total_software,
+            'whitelist_count' => $whitelist_count,
+            'blacklist_count' => $blacklist_count,
+            'unmanaged_count' => $unmanaged_count
+        ]
     ]);
 
 } catch (Exception $e) {
-    http_response_code(500); // Internal Server Error
+    http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode([
         'success' => false,
-        'error' => 'An error occurred during the scan: ' . $e->getMessage()
+        'error' => '创建审计快照时发生错误: ' . $e->getMessage()
     ]);
 }
-
-exit();
+?>

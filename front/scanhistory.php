@@ -8,9 +8,9 @@
  */
 
 include('../../../inc/includes.php');
-
-// Check rights - using standard GLPI permissions
 Session::checkRight('config', READ);
+// Check rights - using standard GLPI permissions
+// GLPI session already authenticated
 
 // Check if plugin is activated
 $plugin = new Plugin();
@@ -18,45 +18,27 @@ if (!$plugin->isInstalled('softwaremanager') || !$plugin->isActivated('softwarem
     Html::displayNotFoundError();
 }
 
-Html::header(__('Scan History', 'softwaremanager'), $_SERVER['PHP_SELF'], 'admin', 'PluginSoftwaremanagerMenu');
+Html::header(__('Scan History', 'softwaremanager'), $_SERVER['PHP_SELF'], 'admin');
 
 // Display navigation
 PluginSoftwaremanagerMenu::displayNavigationHeader('scanhistory');
 
-// Handle manual scan trigger
-if (isset($_POST['action']) && $_POST['action'] === 'start_scan') {
-    // CSRF check
-    Session::checkCSRF($_POST);
-    
-    // Check write permissions for scan
-    if (Session::haveRight('config', UPDATE)) {
-        echo "<div class='alert alert-info'>";
-        echo "<i class='fas fa-spinner fa-spin'></i> " . __('Scan started in background. Please refresh the page in a few moments to see the results.', 'softwaremanager');
-        echo "</div>";
-        
-        // Note: In a real implementation, you might want to trigger the scan via AJAX
-        // or use a background job system. For now, we'll just show the message.
-    } else {
-        echo "<div class='alert alert-danger'>";
-        echo __('Insufficient permissions to start scan.', 'softwaremanager');
-        echo "</div>";
-    }
-}
+// Scan controls are handled via AJAX calls to runscan.php
 
-// Display scan controls if user has write permissions
-if (Session::haveRight('config', UPDATE)) {
+// Display scan controls
+{
     echo "<div class='scan-controls' style='margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px;'>";
     echo "<h3>" . __('Compliance Scan Controls', 'softwaremanager') . "</h3>";
     echo "<p>" . __('Run a manual compliance scan to check all software installations against whitelist and blacklist policies.', 'softwaremanager') . "</p>";
 
     echo "<div style='display: flex; gap: 10px; align-items: center;'>";
 
-    // Manual scan button with AJAX
+    // Manual scan button with AJAX - show for users with central access
     echo "<button type='button' class='btn btn-primary' onclick='startComplianceScan()' id='scan-btn'>";
     echo "<i class='fas fa-search'></i> " . __('Start New Scan', 'softwaremanager');
     echo "</button>";
 
-    // Test button
+    // Test button - show for users with central access
     echo "<button type='button' class='btn btn-secondary' onclick='testAjax()' id='test-btn' style='margin-left: 10px;'>";
     echo "<i class='fas fa-flask'></i> Test AJAX";
     echo "</button>";
@@ -96,13 +78,12 @@ function startComplianceScan() {
     scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <?php echo __('Starting...', 'softwaremanager'); ?>';
     progressDiv.style.display = 'block';
 
-    // Prepare form data with CSRF token - following security best practices
+    // 准备表单数据 - 使用直接 AJAX 文件方式（GLPI 标准做法）
     var formData = new FormData();
     formData.append('action', 'start_scan');
 
-    // Generate and add CSRF token
+    // 添加 CSRF 令牌
     var csrfToken = '<?php echo Session::getNewCSRFToken(); ?>';
-    console.log('Generated CSRF token:', csrfToken);
     formData.append('_glpi_csrf_token', csrfToken);
 
     // Debug: Log all form data
@@ -110,7 +91,7 @@ function startComplianceScan() {
         console.log('FormData:', pair[0] + ' = ' + pair[1]);
     }
 
-    // Start the scan - use fixed endpoint with GLPI standard queries
+    // Start the scan - 使用插件自己的 AJAX 文件
     fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/runscan.php', {
         method: 'POST',
         body: formData
@@ -181,8 +162,13 @@ function startComplianceScan() {
 function testAjax() {
     console.log('Testing AJAX...');
 
-    fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/test_simple.php', {
-        method: 'GET'
+    var formData = new FormData();
+    formData.append('action', 'debug');
+    formData.append('_glpi_csrf_token', '<?php echo Session::getNewCSRFToken(); ?>');
+
+    fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/test_csrf.php', {
+        method: 'POST',
+        body: formData
     })
     .then(response => {
         console.log('Response status:', response.status);
@@ -243,16 +229,7 @@ function showScanResultsHTML(htmlContent) {
     }
 }
 
-// Add CSRF token to the page for AJAX requests
-document.addEventListener('DOMContentLoaded', function() {
-    if (!document.querySelector('input[name="_glpi_csrf_token"]')) {
-        var csrfInput = document.createElement('input');
-        csrfInput.type = 'hidden';
-        csrfInput.name = '_glpi_csrf_token';
-        csrfInput.value = '<?php echo Session::getNewCSRFToken(); ?>';
-        document.body.appendChild(csrfInput);
-    }
-});
+// JavaScript代码结束
 </script>
 
 <style>

@@ -102,13 +102,8 @@ class PluginSoftwaremanagerMenu extends CommonGLPI {
      * @return boolean
      */
     static function canView() {
-        // Super-Admin can always access
-        if (isset($_SESSION['glpiactiveprofile']['name']) && $_SESSION['glpiactiveprofile']['name'] == 'Super-Admin') {
-            return true;
-        }
-
-        // Check if user has config rights (standard GLPI permission)
-        return Session::haveRight('config', READ);
+        // All logged-in users can access the plugin
+        return isset($_SESSION['glpiID']) && $_SESSION['glpiID'];
     }
 
     /**

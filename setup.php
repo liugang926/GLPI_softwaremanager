@@ -22,25 +22,26 @@ function plugin_init_softwaremanager() {
     // Required for CSRF protection - must be true for installation
     $PLUGIN_HOOKS['csrf_compliant']['softwaremanager'] = true;
 
+    // Register AJAX handler class
+    Plugin::registerClass('PluginSoftwaremanagerAjax', [
+        'addtabon' => []
+    ]);
+
+    // Register plugin rights
+    $PLUGIN_HOOKS['use_massive_action']['softwaremanager'] = 1;
+
+    // Define plugin rights - simple approach
+    $PLUGIN_HOOKS['rights']['softwaremanager'] = [
+        'plugin_softwaremanager' => __('Use Software Manager', 'softwaremanager'),
+    ];
+
     // Check if user can access plugin
     if (isset($_SESSION['glpiID']) && $_SESSION['glpiID']) {
         // Include required class files only when needed
         include_once(__DIR__ . '/inc/menu.class.php');
 
-        // Check if user has access permissions
-        $can_access = false;
-
-        // Super-Admin always has access
-        if (isset($_SESSION['glpiactiveprofile']['name']) && $_SESSION['glpiactiveprofile']['name'] == 'Super-Admin') {
-            $can_access = true;
-        } else {
-            // Check standard GLPI rights for now
-            if (Session::haveRight('config', READ)) {
-                $can_access = true;
-            }
-        }
-
-        if ($can_access) {
+        // Check if user has central access (simplified permission check)
+        if (Session::haveAccessToEntity($_SESSION['glpiactive_entity'])) {
             // Add to menu
             $PLUGIN_HOOKS['menu_toadd']['softwaremanager'] = [
                 'admin' => 'PluginSoftwaremanagerMenu'
@@ -125,35 +126,9 @@ function plugin_softwaremanager_check_config($verbose = false) {
  * @return boolean
  */
 function plugin_softwaremanager_install() {
-    try {
-        // Include required class files
-        include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
-        include_once(__DIR__ . '/inc/softwareblacklist.class.php');
-        include_once(__DIR__ . '/inc/scanhistory.class.php');
-        include_once(__DIR__ . '/inc/scanresult.class.php');
-
-        // Initialize database tables
-        $migration = new Migration(PLUGIN_SOFTWAREMANAGER_VERSION);
-
-        // Create database tables
-        PluginSoftwaremanagerSoftwareWhitelist::install($migration);
-        PluginSoftwaremanagerSoftwareBlacklist::install($migration);
-        PluginSoftwaremanagerScanhistory::install($migration);
-        PluginSoftwaremanagerScanresult::install($migration);
-
-        $migration->executeMigration();
-
-        // Register plugin rights following GLPI plugin development documentation
-        // Note: Rights registration will be handled by GLPI's profile system
-        // For now, we'll rely on existing GLPI rights like 'config' for access control
-
-        return true;
-
-    } catch (Exception $e) {
-        // Log error for debugging
-        error_log("Software Manager Plugin installation failed: " . $e->getMessage());
-        return false;
-    }
+    // Use installation class
+    include_once(__DIR__ . '/inc/install.class.php');
+    return PluginSoftwaremanagerInstall::install();
 }
 
 /**
@@ -162,24 +137,7 @@ function plugin_softwaremanager_install() {
  * @return boolean
  */
 function plugin_softwaremanager_uninstall() {
-    try {
-        // Include required class files
-        include_once(__DIR__ . '/inc/softwarewhitelist.class.php');
-        include_once(__DIR__ . '/inc/softwareblacklist.class.php');
-        include_once(__DIR__ . '/inc/scanhistory.class.php');
-        include_once(__DIR__ . '/inc/scanresult.class.php');
-
-        // Drop database tables
-        PluginSoftwaremanagerSoftwareWhitelist::uninstall();
-        PluginSoftwaremanagerSoftwareBlacklist::uninstall();
-        PluginSoftwaremanagerScanhistory::uninstall();
-        PluginSoftwaremanagerScanresult::uninstall();
-
-        return true;
-
-    } catch (Exception $e) {
-        // Log error for debugging
-        error_log("Software Manager Plugin uninstallation failed: " . $e->getMessage());
-        return false;
-    }
+    // Use installation class
+    include_once(__DIR__ . '/inc/install.class.php');
+    return PluginSoftwaremanagerInstall::uninstall();
 }
