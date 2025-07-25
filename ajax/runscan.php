@@ -20,17 +20,16 @@ include('../../../inc/includes.php');
 // Clear any unexpected output
 ob_clean();
 
-// Set HTML headers for direct display
-header('Content-Type: text/html; charset=utf-8');
+// Set JSON headers for API response
+header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, must-revalidate');
 
-// Check user authentication - same as software_details.php
+// 2.1 使用与 software_details.php 相同的简单登录检查
 if (!Session::getLoginUserID()) {
+    // 如果用户未登录，返回一个标准的JSON错误并退出
     ob_clean(); // Clear output buffer before response
-    echo "<div style='color: red; padding: 20px;'>";
-    echo "<h3>❌ Authentication Error</h3>";
-    echo "<p>User not logged in or session expired</p>";
-    echo "</div>";
+    http_response_code(401); // Unauthorized
+    echo json_encode(['error' => '用户未登录 (User not logged in)']);
     exit;
 }
 
@@ -60,10 +59,17 @@ function getScanLogs() {
     return $scan_logs;
 }
 
-// CSRF check temporarily disabled to resolve installation issues - same as softwarelist.php
-// if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-//     check_CSRF();
-// }
+// 2.2 正确处理 CSRF 令牌 (这是解决"请求不允许"的关键！)
+// 我们需要检查从前端POST过来的令牌，而不是临时禁用它
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!isset($_POST['_glpi_csrf_token']) || !Session::validateCSRF($_POST['_glpi_csrf_token'])) {
+        // 如果令牌不存在或无效，返回JSON错误
+        ob_clean();
+        http_response_code(403); // Forbidden
+        echo json_encode(['error' => '无效的安全令牌 (Invalid CSRF token). 请求不允许 (Request not allowed).']);
+        exit;
+    }
+}
 
 try {
     logScanEvent('info', '=== Starting Software Compliance Scan ===');

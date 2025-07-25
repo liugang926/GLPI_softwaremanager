@@ -96,9 +96,11 @@ function startComplianceScan() {
     scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <?php echo __('Starting...', 'softwaremanager'); ?>';
     progressDiv.style.display = 'block';
 
-    // Prepare simple form data - same as softwarelist.php
+    // Prepare form data with CSRF token - following security best practices
     var formData = new FormData();
     formData.append('action', 'start_scan');
+    // 这个令牌必须由PHP在页面上生成并传递给JS
+    formData.append('_glpi_csrf_token', '<?php echo Session::getNewCSRFToken(); ?>');
 
     // Start the scan - use fixed endpoint with GLPI standard queries
     fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/runscan.php', {
@@ -107,17 +109,39 @@ function startComplianceScan() {
     })
     .then(response => {
         if (!response.ok) {
-            throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+            // Try to parse error as JSON first
+            return response.json().then(errorData => {
+                throw new Error(errorData.error || 'HTTP ' + response.status + ': ' + response.statusText);
+            }).catch(() => {
+                throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+            });
         }
-        return response.text(); // Get HTML response instead of JSON
+
+        // Check if response is JSON or HTML
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            return response.json();
+        } else {
+            return response.text();
+        }
     })
-    .then(htmlContent => {
+    .then(content => {
         progressDiv.style.display = 'none';
         scanBtn.disabled = false;
         scanBtn.innerHTML = originalText;
 
-        // Show HTML content in modal
-        showScanResultsHTML(htmlContent);
+        // Handle both JSON and HTML responses
+        if (typeof content === 'object' && content.error) {
+            // JSON error response
+            alert('扫描失败: ' + content.error);
+        } else if (typeof content === 'object' && content.success) {
+            // JSON success response
+            alert('扫描成功: ' + content.message);
+            window.location.reload(); // Refresh to show new scan history
+        } else {
+            // HTML response (detailed scan results)
+            showScanResultsHTML(content);
+        }
     })
     .catch(error => {
         progressDiv.style.display = 'none';
