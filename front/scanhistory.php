@@ -99,8 +99,16 @@ function startComplianceScan() {
     // Prepare form data with CSRF token - following security best practices
     var formData = new FormData();
     formData.append('action', 'start_scan');
-    // 这个令牌必须由PHP在页面上生成并传递给JS
-    formData.append('_glpi_csrf_token', '<?php echo Session::getNewCSRFToken(); ?>');
+
+    // Generate and add CSRF token
+    var csrfToken = '<?php echo Session::getNewCSRFToken(); ?>';
+    console.log('Generated CSRF token:', csrfToken);
+    formData.append('_glpi_csrf_token', csrfToken);
+
+    // Debug: Log all form data
+    for (var pair of formData.entries()) {
+        console.log('FormData:', pair[0] + ' = ' + pair[1]);
+    }
 
     // Start the scan - use fixed endpoint with GLPI standard queries
     fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/runscan.php', {
