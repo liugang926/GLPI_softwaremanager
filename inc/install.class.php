@@ -88,17 +88,66 @@ class PluginSoftwaremanagerInstall {
      * @return void
      */
     private static function uninstallTables() {
-        // Include required class files
-        include_once(__DIR__ . '/softwarewhitelist.class.php');
-        include_once(__DIR__ . '/softwareblacklist.class.php');
-        include_once(__DIR__ . '/scanhistory.class.php');
-        include_once(__DIR__ . '/scanresult.class.php');
+        // Include required class files (safely)
+        $required_files = [
+            'softwarewhitelist.class.php',
+            'softwareblacklist.class.php'
+        ];
+        
+        foreach ($required_files as $file) {
+            $file_path = __DIR__ . '/' . $file;
+            if (file_exists($file_path)) {
+                include_once($file_path);
+            }
+        }
 
-        // Drop database tables
-        PluginSoftwaremanagerSoftwareWhitelist::uninstall();
-        PluginSoftwaremanagerSoftwareBlacklist::uninstall();
-        PluginSoftwaremanagerScanhistory::uninstall();
-        PluginSoftwaremanagerScanresult::uninstall();
+        // Drop database tables using CommonDBTM uninstall methods
+        if (class_exists('PluginSoftwaremanagerSoftwareWhitelist')) {
+            PluginSoftwaremanagerSoftwareWhitelist::uninstall();
+        }
+        if (class_exists('PluginSoftwaremanagerSoftwareBlacklist')) {
+            PluginSoftwaremanagerSoftwareBlacklist::uninstall();
+        }
+        
+        // Uninstall optional model classes (safely)
+        $optional_classes = [
+            'scanhistory.class.php' => 'PluginSoftwaremanagerScanhistory',
+            'scanresult.class.php' => 'PluginSoftwaremanagerScanresult'
+        ];
+        
+        foreach ($optional_classes as $file => $class) {
+            $class_file = __DIR__ . '/' . $file;
+            if (file_exists($class_file)) {
+                try {
+                    include_once($class_file);
+                    if (class_exists($class) && method_exists($class, 'uninstall')) {
+                        $class::uninstall();
+                    }
+                } catch (Exception $e) {
+                    // Log error but don't fail the uninstall
+                    error_log("Warning: Failed to uninstall $class: " . $e->getMessage());
+                }
+            }
+        }
+        
+        // Force drop any remaining tables
+        global $DB;
+        $tables_to_drop = [
+            'glpi_plugin_softwaremanager_scanhistory',
+            'glpi_plugin_softwaremanager_scanresults',
+            'glpi_plugin_softwaremanager_whitelists',
+            'glpi_plugin_softwaremanager_blacklists'
+        ];
+        
+        foreach ($tables_to_drop as $table) {
+            if ($DB->tableExists($table)) {
+                try {
+                    $DB->query("DROP TABLE IF EXISTS `$table`");
+                } catch (Exception $e) {
+                    error_log("Warning: Failed to drop table $table: " . $e->getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -109,20 +158,37 @@ class PluginSoftwaremanagerInstall {
     private static function installRights() {
         global $DB;
 
-        // Simple approach: Give all logged-in users access to the plugin
-        // by adding basic plugin rights to all existing profiles
-
+        // Get all existing profiles
         $profiles = $DB->request([
             'FROM' => 'glpi_profiles'
         ]);
 
         foreach ($profiles as $profile) {
-            // Add basic plugin access right for all profiles
-            $DB->insertOrDie('glpi_profilerights', [
-                'profiles_id' => $profile['id'],
-                'name'        => 'plugin_softwaremanager',
-                'rights'      => READ | UPDATE | CREATE | DELETE
+            // Check if this profile already has the plugin right
+            $existing = $DB->request([
+                'FROM' => 'glpi_profilerights',
+                'WHERE' => [
+                    'profiles_id' => $profile['id'],
+                    'name' => 'plugin_softwaremanager'
+                ]
             ]);
+
+            if (count($existing) == 0) {
+                // Right doesn't exist, create it
+                $DB->insert('glpi_profilerights', [
+                    'profiles_id' => $profile['id'],
+                    'name'        => 'plugin_softwaremanager',
+                    'rights'      => READ | UPDATE | CREATE | DELETE
+                ]);
+            } else {
+                // Right exists, update it to ensure correct permissions
+                $DB->update('glpi_profilerights', [
+                    'rights' => READ | UPDATE | CREATE | DELETE
+                ], [
+                    'profiles_id' => $profile['id'],
+                    'name' => 'plugin_softwaremanager'
+                ]);
+            }
         }
     }
 

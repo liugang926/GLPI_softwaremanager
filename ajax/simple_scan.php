@@ -1,57 +1,113 @@
 <?php
 /**
- * Simple Scan Endpoint - Minimal Implementation
+ * Fixed simple scan based on debug results
  */
 
 include('../../../inc/includes.php');
 
-// Check authentication
-if (!Session::getLoginUserID()) {
-    echo "<div style='color: red; padding: 20px;'>";
-    echo "<h3>❌ Authentication Error</h3>";
-    echo "<p>User not logged in</p>";
-    echo "</div>";
-    exit;
+// Set JSON response header first
+header('Content-Type: application/json; charset=UTF-8');
+
+// Clean any previous output
+while (ob_get_level()) {
+    ob_end_clean();
 }
 
-// Simple scan simulation
-echo "<div style='padding: 20px; font-family: Arial, sans-serif;'>";
-echo "<h3 style='color: green;'>✅ Scan Completed Successfully!</h3>";
+try {
+    // 检查用户登录
+    if (!Session::getLoginUserID()) {
+        echo json_encode([
+            'success' => false,
+            'error' => 'User not logged in'
+        ]);
+        exit;
+    }
 
-echo "<div style='background: #e8f5e8; padding: 15px; margin: 15px 0; border-radius: 5px;'>";
-echo "<h4>Scan Statistics:</h4>";
-echo "<table style='width: 100%; border-collapse: collapse;'>";
-echo "<tr><td><strong>Total Software Installations:</strong></td><td>150</td></tr>";
-echo "<tr><td><strong>Approved (Whitelist):</strong></td><td style='color: green;'>120</td></tr>";
-echo "<tr><td><strong>Blacklist Violations:</strong></td><td style='color: red;'>5</td></tr>";
-echo "<tr><td><strong>Unregistered Software:</strong></td><td style='color: orange;'>25</td></tr>";
-echo "<tr><td><strong>Scan Duration:</strong></td><td>2.5 seconds</td></tr>";
-echo "<tr><td><strong>Scan Time:</strong></td><td>" . date('Y-m-d H:i:s') . "</td></tr>";
-echo "</table>";
-echo "</div>";
+    global $DB;
+    if (!$DB) {
+        throw new Exception('Database connection not available');
+    }
 
-echo "<h4>Scan Process Logs:</h4>";
-echo "<div style='background: #f5f5f5; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; border: 1px solid #ddd; white-space: pre-wrap;'>";
-echo "[" . date('Y-m-d H:i:s') . "] [info] === Starting Software Compliance Scan ===\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] User ID: " . Session::getLoginUserID() . "\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Creating scan history record...\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Scan history record created with ID: 123\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Retrieving software installations from database...\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Loading compliance rules...\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Loaded 10 whitelist rules\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Loaded 3 blacklist rules\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Processing 150 software installations...\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Progress: 100/150 installations processed\n";
-echo "[" . date('Y-m-d H:i:s') . "] [warning] BLACKLIST VIOLATION: 'Unauthorized Tool' on computer 'PC001' (User: john.doe)\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] UNREGISTERED: 'Custom Software' on computer 'PC002' (User: jane.smith)\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Updating scan history with final statistics...\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] === Scan Completed Successfully ===\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Total software installations: 150\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Approved (whitelist): 120\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Blacklist violations: 5\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Unregistered software: 25\n";
-echo "[" . date('Y-m-d H:i:s') . "] [info] Scan duration: 2.5 seconds\n";
-echo "</div>";
+    // 简化的扫描逻辑：基于现有软件列表数据创建审计快照
+    $total_software = 0;
+    $whitelist_count = 0;
+    $blacklist_count = 0;
+    $unmanaged_count = 0;
 
-echo "</div>";
+    // 获取软件总数 - 添加错误处理
+    $software_query = "SELECT COUNT(*) as total FROM `glpi_softwares` WHERE `is_deleted` = 0";
+    $result = $DB->query($software_query);
+    if ($result && $row = $DB->fetchAssoc($result)) {
+        $total_software = (int)$row['total'];
+    } else {
+        throw new Exception('Failed to count software: ' . $DB->error());
+    }
+
+    // 获取白名单数量 - 添加错误处理
+    $whitelist_query = "SELECT COUNT(*) as count FROM `glpi_plugin_softwaremanager_whitelists`";
+    $result = $DB->query($whitelist_query);
+    if ($result && $row = $DB->fetchAssoc($result)) {
+        $whitelist_count = (int)$row['count'];
+    } else {
+        throw new Exception('Failed to count whitelist: ' . $DB->error());
+    }
+
+    // 获取黑名单数量 - 添加错误处理
+    $blacklist_query = "SELECT COUNT(*) as count FROM `glpi_plugin_softwaremanager_blacklists`";
+    $result = $DB->query($blacklist_query);
+    if ($result && $row = $DB->fetchAssoc($result)) {
+        $blacklist_count = (int)$row['count'];
+    } else {
+        throw new Exception('Failed to count blacklist: ' . $DB->error());
+    }
+
+    // 计算未管理数量
+    $unmanaged_count = $total_software - $whitelist_count - $blacklist_count;
+    if ($unmanaged_count < 0) $unmanaged_count = 0;
+
+    // 创建扫描历史记录（审计快照）- 使用与调试版本相同的格式
+    $scan_time = date('Y-m-d H:i:s');
+    $user_id = Session::getLoginUserID();
+
+    $insert_query = "INSERT INTO `glpi_plugin_softwaremanager_scanhistory`
+                     (`user_id`, `scan_date`, `total_software`, `whitelist_count`, `blacklist_count`, `unmanaged_count`, `status`)
+                     VALUES ($user_id, '$scan_time', $total_software, $whitelist_count, $blacklist_count, $unmanaged_count, 'completed')";
+
+    $result = $DB->query($insert_query);
+    if (!$result) {
+        throw new Exception('Failed to insert scan record: ' . $DB->error());
+    }
+    
+    $scan_id = $DB->insertId();
+    if (!$scan_id) {
+        throw new Exception('Insert succeeded but no ID returned');
+    }
+
+    // 验证插入
+    $verify_query = "SELECT * FROM `glpi_plugin_softwaremanager_scanhistory` WHERE id = $scan_id";
+    $verify_result = $DB->query($verify_query);
+    if (!$verify_result || !$DB->fetchAssoc($verify_result)) {
+        throw new Exception('Insert verification failed');
+    }
+
+    echo json_encode([
+        'success' => true,
+        'message' => "扫描完成！总计 {$total_software} 个软件，白名单 {$whitelist_count} 个，黑名单 {$blacklist_count} 个，未管理 {$unmanaged_count} 个。",
+        'scan_id' => $scan_id,
+        'stats' => [
+            'total_software' => $total_software,
+            'whitelist_count' => $whitelist_count,
+            'blacklist_count' => $blacklist_count,
+            'unmanaged_count' => $unmanaged_count
+        ]
+    ]);
+
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'error' => '扫描时发生错误: ' . $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine()
+    ]);
+}
 ?>

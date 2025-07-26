@@ -1,7 +1,7 @@
 <?php
 /**
  * Software Manager Plugin for GLPI
- * Scan History List Page
+ * Scan History List Page - Clean Version
  * 
  * @author  Abner Liu
  * @license GPL-2.0+
@@ -23,24 +23,25 @@ Html::header(__('Scan History', 'softwaremanager'), $_SERVER['PHP_SELF'], 'admin
 // Display navigation
 PluginSoftwaremanagerMenu::displayNavigationHeader('scanhistory');
 
-// Scan controls are handled via AJAX calls to runscan.php
-
 // Display scan controls
 {
     echo "<div class='scan-controls' style='margin-bottom: 20px; padding: 15px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px;'>";
-    echo "<h3>" . __('Compliance Scan Controls', 'softwaremanager') . "</h3>";
-    echo "<p>" . __('Run a manual compliance scan to check all software installations against whitelist and blacklist policies.', 'softwaremanager') . "</p>";
+    echo "<h3>" . __('软件合规性扫描', 'softwaremanager') . "</h3>";
+    echo "<p>" . __('执行深度合规性扫描，检查所有实际的软件安装记录，识别违规软件并关联到具体的计算机和用户。', 'softwaremanager') . "</p>";
+    echo "<div class='scan-features' style='background: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 13px;'>";
+    echo "<strong>✅ 扫描功能：</strong><br>";
+    echo "• 检查实际软件安装记录，而非软件库统计<br>";
+    echo "• 精确匹配白名单和黑名单规则<br>";
+    echo "• 识别具体违规软件及其安装位置<br>";
+    echo "• 关联计算机、用户和安装时间信息<br>";
+    echo "• 生成详细的合规性报告";
+    echo "</div>";
 
     echo "<div style='display: flex; gap: 10px; align-items: center;'>";
 
-    // Manual scan button with AJAX - show for users with central access
+    // Manual scan button with AJAX
     echo "<button type='button' class='btn btn-primary' onclick='startComplianceScan()' id='scan-btn'>";
-    echo "<i class='fas fa-search'></i> " . __('Start New Scan', 'softwaremanager');
-    echo "</button>";
-
-    // Test button - show for users with central access
-    echo "<button type='button' class='btn btn-secondary' onclick='testAjax()' id='test-btn' style='margin-left: 10px;'>";
-    echo "<i class='fas fa-flask'></i> Test AJAX";
+    echo "<i class='fas fa-shield-alt'></i> " . __('开始合规性扫描', 'softwaremanager');
     echo "</button>";
 
     // Progress indicator (hidden by default)
@@ -52,12 +53,70 @@ PluginSoftwaremanagerMenu::displayNavigationHeader('scanhistory');
     echo "</div>";
 }
 
-// Display scan history using GLPI's standard search interface
+// Display scan history using direct database query
 echo "<div class='scan-history-list'>";
 echo "<h2>" . __('Scan History', 'softwaremanager') . "</h2>";
 
-// Use GLPI's standard search interface
-Search::show('PluginSoftwaremanagerScanhistory');
+// Get scan history data directly
+global $DB;
+$query = "SELECT s.*, u.name as user_name 
+          FROM `glpi_plugin_softwaremanager_scanhistory` s 
+          LEFT JOIN `glpi_users` u ON s.user_id = u.id 
+          ORDER BY s.scan_date DESC 
+          LIMIT 20";
+
+$result = $DB->query($query);
+
+if ($result && $DB->numrows($result) > 0) {
+    echo "<div class='table-responsive'>";
+    echo "<table class='table table-striped table-hover'>";
+    echo "<thead>";
+    echo "<tr>";
+    echo "<th>" . __('ID') . "</th>";
+    echo "<th>" . __('扫描日期', 'softwaremanager') . "</th>";
+    echo "<th>" . __('软件安装总数', 'softwaremanager') . "</th>";
+    echo "<th>" . __('合规安装', 'softwaremanager') . "</th>";
+    echo "<th>" . __('违规安装', 'softwaremanager') . "</th>";
+    echo "<th>" . __('未登记安装', 'softwaremanager') . "</th>";
+    echo "<th>" . __('Status', 'softwaremanager') . "</th>";
+    echo "<th>" . __('User') . "</th>";
+    echo "<th>" . __('Actions', 'softwaremanager') . "</th>";
+    echo "</tr>";
+    echo "</thead>";
+    echo "<tbody>";
+    
+    while ($row = $DB->fetchAssoc($result)) {
+        echo "<tr>";
+        echo "<td>" . $row['id'] . "</td>";
+        echo "<td>" . Html::convDateTime($row['scan_date']) . "</td>";
+        echo "<td><span class='badge badge-info'>总计 " . $row['total_software'] . "</span></td>";
+        echo "<td><span class='badge badge-success'>✓ " . $row['whitelist_count'] . "</span></td>";
+        echo "<td><span class='badge badge-danger'>⚠ " . $row['blacklist_count'] . "</span></td>";
+        echo "<td><span class='badge badge-warning'>? " . $row['unmanaged_count'] . "</span></td>";
+        
+        $status_class = $row['status'] == 'completed' ? 'success' : ($row['status'] == 'test' ? 'info' : 'secondary');
+        echo "<td><span class='badge badge-{$status_class}'>" . ucfirst($row['status']) . "</span></td>";
+        
+        echo "<td>" . ($row['user_name'] ?? 'Unknown') . "</td>";
+        
+        // Actions column
+        echo "<td>";
+        echo "<a href='scanresult.php?id=" . $row['id'] . "' class='btn btn-sm btn-primary' title='" . __('View Details', 'softwaremanager') . "'>";
+        echo "<i class='fas fa-eye'></i> " . __('Details', 'softwaremanager');
+        echo "</a>";
+        echo "</td>";
+        
+        echo "</tr>";
+    }
+    
+    echo "</tbody>";
+    echo "</table>";
+    echo "</div>";
+} else {
+    echo "<div class='alert alert-info'>";
+    echo "<i class='fas fa-info-circle'></i> " . __('No scan history found. Run a scan to see results here.', 'softwaremanager');
+    echo "</div>";
+}
 
 echo "</div>";
 
@@ -78,21 +137,11 @@ function startComplianceScan() {
     scanBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <?php echo __('Starting...', 'softwaremanager'); ?>';
     progressDiv.style.display = 'block';
 
-    // 准备表单数据 - 使用直接 AJAX 文件方式（GLPI 标准做法）
+    // Prepare form data
     var formData = new FormData();
-    formData.append('action', 'start_scan');
 
-    // 添加 CSRF 令牌
-    var csrfToken = '<?php echo Session::getNewCSRFToken(); ?>';
-    formData.append('_glpi_csrf_token', csrfToken);
-
-    // Debug: Log all form data
-    for (var pair of formData.entries()) {
-        console.log('FormData:', pair[0] + ' = ' + pair[1]);
-    }
-
-    // Start the scan - 使用插件自己的 AJAX 文件
-    fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/runscan.php', {
+    // Start the scan
+    fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/compliance_scan.php', {
         method: 'POST',
         body: formData
     })
@@ -158,33 +207,6 @@ function startComplianceScan() {
     });
 }
 
-// Test AJAX function
-function testAjax() {
-    console.log('Testing AJAX...');
-
-    var formData = new FormData();
-    formData.append('action', 'debug');
-    formData.append('_glpi_csrf_token', '<?php echo Session::getNewCSRFToken(); ?>');
-
-    fetch('<?php echo $CFG_GLPI['root_doc']; ?>/plugins/softwaremanager/ajax/test_csrf.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        console.log('Response status:', response.status);
-        console.log('Response headers:', response.headers);
-        return response.text();
-    })
-    .then(htmlContent => {
-        console.log('Response content:', htmlContent);
-        showScanResultsHTML(htmlContent);
-    })
-    .catch(error => {
-        console.error('Test error:', error);
-        alert('Test failed: ' + error.message);
-    });
-}
-
 // Function to show HTML scan results
 function showScanResultsHTML(htmlContent) {
     const modal = document.createElement('div');
@@ -228,8 +250,6 @@ function showScanResultsHTML(htmlContent) {
         }, 10000);
     }
 }
-
-// JavaScript代码结束
 </script>
 
 <style>

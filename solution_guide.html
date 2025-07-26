@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>扫描结果问题解决指南</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .code { background: #f4f4f4; padding: 10px; border-left: 4px solid #ccc; margin: 10px 0; }
+        .warning { background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 4px; }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; padding: 10px; border-radius: 4px; }
+        .error { background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🔧 扫描结果问题解决指南</h1>
+    
+    <div class="warning">
+        <h2>⚠️ 当前问题</h2>
+        <p>扫描结果显示所有50个软件都是"合规安装"，违规和未登记都是0条。</p>
+        <p>调试信息显示有50条白名单和50条黑名单规则，但显示为"Array"格式。</p>
+    </div>
+
+    <h2>🎯 可能的原因</h2>
+    <ol>
+        <li><strong>数据库表为空</strong> - 虽然显示50条规则，但实际数据可能为空</li>
+        <li><strong>白名单规则过于宽泛</strong> - 包含短词汇或通用规则导致过度匹配</li>
+        <li><strong>数据结构问题</strong> - 规则数据格式不正确</li>
+    </ol>
+
+    <h2>🚀 立即解决方案</h2>
+
+    <h3>步骤1: 检查数据库表状态</h3>
+    <p>在GLPI数据库中执行以下SQL查询：</p>
+    <div class="code">
+SELECT COUNT(*) as 白名单数量 FROM glpi_plugin_softwaremanager_whitelists WHERE is_active = 1;<br>
+SELECT COUNT(*) as 黑名单数量 FROM glpi_plugin_softwaremanager_blacklists WHERE is_active = 1;<br><br>
+
+-- 查看白名单样本<br>
+SELECT name, exact_match, is_active FROM glpi_plugin_softwaremanager_whitelists LIMIT 5;<br><br>
+
+-- 查看黑名单样本<br>
+SELECT name, exact_match, is_active FROM glpi_plugin_softwaremanager_blacklists LIMIT 5;
+    </div>
+
+    <h3>步骤2: 根据检查结果选择解决方案</h3>
+
+    <h4>🅰️ 如果表为空或数据异常</h4>
+    <div class="code">
+-- 清空现有数据<br>
+DELETE FROM glpi_plugin_softwaremanager_whitelists;<br>
+DELETE FROM glpi_plugin_softwaremanager_blacklists;<br><br>
+
+-- 创建精确的测试数据<br>
+INSERT INTO glpi_plugin_softwaremanager_whitelists (name, exact_match, is_active, date_creation) VALUES<br>
+('Bonjour', 1, 1, NOW()),<br>
+('Microsoft Visual C++ 2019 Redistributable (x64) - 14.29.30139', 1, 1, NOW());<br><br>
+
+INSERT INTO glpi_plugin_softwaremanager_blacklists (name, exact_match, is_active, date_creation) VALUES<br>
+('Adobe Genuine Service', 1, 1, NOW()),<br>
+('barrier', 0, 1, NOW()),<br>
+('64 Bit HP CIO', 0, 1, NOW());
+    </div>
+
+    <h4>🅱️ 如果表有数据但过度匹配</h4>
+    <div class="code">
+-- 临时禁用所有通配符规则<br>
+UPDATE glpi_plugin_softwaremanager_whitelists SET is_active = 0 WHERE exact_match = 0;<br><br>
+
+-- 只保留精确匹配规则<br>
+UPDATE glpi_plugin_softwaremanager_whitelists SET is_active = 1 WHERE exact_match = 1 AND name IN (<br>
+&nbsp;&nbsp;'Bonjour',<br>
+&nbsp;&nbsp;'64 Bit HP CIO Components Installer'<br>
+);
+    </div>
+
+    <h4>🅲️ 如果需要完全重置</h4>
+    <div class="code">
+-- 禁用所有规则<br>
+UPDATE glpi_plugin_softwaremanager_whitelists SET is_active = 0;<br>
+UPDATE glpi_plugin_softwaremanager_blacklists SET is_active = 0;<br><br>
+
+-- 只启用最少的测试规则<br>
+UPDATE glpi_plugin_softwaremanager_whitelists SET is_active = 1 WHERE name = 'Bonjour';<br>
+UPDATE glpi_plugin_softwaremanager_blacklists SET is_active = 1 WHERE name = 'Adobe Genuine Service';
+    </div>
+
+    <h3>步骤3: 验证修复结果</h3>
+    <div class="success">
+        <p><strong>执行SQL后，重新运行合规性扫描，预期结果：</strong></p>
+        <ul>
+            <li>✅ 合规安装: 1-2条 (如Bonjour)</li>
+            <li>❌ 违规安装: 1-3条 (如Adobe Genuine Service, Barrier等)</li>
+            <li>❓ 未登记安装: 45-48条 (其他所有软件)</li>
+        </ul>
+    </div>
+
+    <h2>🔍 故障排除</h2>
+
+    <h3>如果仍然显示所有软件为合规</h3>
+    <ol>
+        <li>检查白名单是否完全为空：
+            <div class="code">SELECT COUNT(*) FROM glpi_plugin_softwaremanager_whitelists WHERE is_active = 1;</div>
+        </li>
+        <li>检查是否有过于宽泛的规则：
+            <div class="code">SELECT name FROM glpi_plugin_softwaremanager_whitelists WHERE is_active = 1 AND exact_match = 0 AND LENGTH(name) <= 4;</div>
+        </li>
+        <li>检查插件是否正确读取数据库：访问 <code>simple_check.php</code></li>
+    </ol>
+
+    <h3>如果脚本无法执行</h3>
+    <ul>
+        <li>直接在数据库管理工具(如phpMyAdmin)中执行SQL</li>
+        <li>检查GLPI插件目录的文件权限</li>
+        <li>查看GLPI错误日志: <code>files/_log/php-errors.log</code></li>
+    </ul>
+
+    <div class="error">
+        <h3>🆘 紧急解决方案</h3>
+        <p>如果所有方法都失败，执行这个最小化解决方案：</p>
+        <div class="code">
+-- 完全清空规则表<br>
+TRUNCATE TABLE glpi_plugin_softwaremanager_whitelists;<br>
+TRUNCATE TABLE glpi_plugin_softwaremanager_blacklists;<br><br>
+
+-- 只添加一条白名单和一条黑名单<br>
+INSERT INTO glpi_plugin_softwaremanager_whitelists (name, exact_match, is_active, date_creation) VALUES ('Bonjour', 1, 1, NOW());<br>
+INSERT INTO glpi_plugin_softwaremanager_blacklists (name, exact_match, is_active, date_creation) VALUES ('Adobe Genuine Service', 1, 1, NOW());
+        </div>
+        <p>这样应该能看到: 1个合规, 1个违规, 48个未登记</p>
+    </div>
+
+    <p><strong>⏰ 执行任何SQL后，请立即重新运行合规性扫描验证结果！</strong></p>
+</body>
+</html>
