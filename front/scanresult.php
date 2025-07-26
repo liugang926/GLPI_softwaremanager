@@ -127,13 +127,16 @@ if (!empty($blacklist_debug['samples'])) {
 }
 echo "</div>";
 
-// 使用改进的查询，确保合规状态检测正确
+// 使用与compliance_scan.php完全相同的查询逻辑来获取扫描数据
 $software_query = "SELECT 
+                   s.id as software_id,
                    s.name as software_name,
                    sv.name as software_version,
                    isv.date_install,
+                   c.id as computer_id,
                    c.name as computer_name,
                    c.serial as computer_serial,
+                   u.id as user_id,
                    u.name as user_name,
                    u.realname as user_realname,
                    e.name as entity_name,
@@ -152,15 +155,66 @@ $software_query = "SELECT
                    )
                    LEFT JOIN `glpi_users` u ON (c.users_id = u.id)
                    LEFT JOIN `glpi_entities` e ON (c.entities_id = e.id)
-                   WHERE s.is_deleted = 0 AND c.id IS NOT NULL
-                   ORDER BY s.name, c.name
-                   LIMIT 50";
+                   WHERE s.is_deleted = 0 
+                   AND isv.id IS NOT NULL
+                   ORDER BY s.name, c.name";
 
 $software_result = $DB->query($software_query);
 
-// 手动进行合规性检查，因为SQL的LIKE可能不够准确
-$installations_with_compliance = [];
+// 添加与compliance_scan.php相同的去重逻辑
+$installations = [];
 if ($software_result) {
+    while ($row = $DB->fetchAssoc($software_result)) {
+        $installations[] = $row;
+    }
+}
+
+// 按电脑分组软件安装，进行去重处理（与compliance_scan.php相同逻辑）
+$installations_by_computer = [];
+foreach ($installations as $installation) {
+    $computer_id = $installation['computer_id'];
+    $software_base_name = extractBaseSoftwareName($installation['software_name']);
+    
+    // 使用电脑ID和软件基础名称作为键进行去重
+    $key = $computer_id . '_' . $software_base_name;
+    
+    // 只保留第一个或最新的安装记录
+    if (!isset($installations_by_computer[$key]) || 
+        $installation['date_install'] > $installations_by_computer[$key]['date_install']) {
+        $installations_by_computer[$key] = $installation;
+    }
+}
+
+// 转换回数组格式
+$unique_installations = array_values($installations_by_computer);
+
+/**
+ * 提取软件基础名称（去除版本号等） - 与compliance_scan.php相同的函数
+ */
+function extractBaseSoftwareName($software_name) {
+    $name = strtolower(trim($software_name));
+    
+    // 移除常见的版本模式
+    $patterns = [
+        '/\s+\d+(\.\d+)*/',           // 版本号 "2022", "1.0.1" 
+        '/\s+\(\d+-bit\)/',           // "(64-bit)", "(32-bit)"
+        '/\s+\(x\d+\)/',              // "(x64)", "(x86)"
+        '/\s+v\d+(\.\d+)*/',          // "v1.0"
+        '/\s+version\s+\d+/',         // "version 2022"
+        '/\s+\d{4}/',                 // 年份 "2022", "2023"
+        '/\s+(premium|professional|standard|basic|lite)$/i', // 版本类型
+    ];
+    
+    foreach ($patterns as $pattern) {
+        $name = preg_replace($pattern, '', $name);
+    }
+    
+    return trim($name);
+}
+
+// 手动进行合规性检查，使用去重后的数据
+$installations_with_compliance = [];
+if (count($unique_installations) > 0) {
     // 获取白名单和黑名单规则
     $whitelists = [];
     $blacklists = [];
@@ -236,11 +290,10 @@ if ($software_result) {
     echo "</div>";
     
     // 重置结果指针并处理每条记录
-    $DB->dataSeek($software_result, 0);
     $compliance_debug = ['approved' => 0, 'blacklisted' => 0, 'unmanaged' => 0];
     $sample_matches = ['approved' => [], 'blacklisted' => [], 'unmanaged' => []];
     
-    while ($installation = $DB->fetchAssoc($software_result)) {
+    foreach ($unique_installations as $installation) {
         $software_name_lower = strtolower(trim($installation['software_name']));
         $compliance_status = 'unmanaged';
         $matched_rule = '';
@@ -313,17 +366,16 @@ if ($software_result) {
 
 echo "<div class='alert alert-warning'>";
 echo "<strong>Debug Info:</strong> Query executed. ";
-if ($software_result) {
-    $result_count = $DB->numrows($software_result);
-    echo "Found {$result_count} installation records.";
-    echo "<br><strong>Query used:</strong> " . htmlspecialchars(substr($software_query, 0, 200)) . "...";
+if (count($unique_installations) > 0) {
+    $result_count = count($unique_installations);
+    echo "Found {$result_count} unique installation records after deduplication.";
+    echo "<br><strong>Original records:</strong> " . count($installations) . " → <strong>After deduplication:</strong> " . count($unique_installations);
 } else {
-    echo "Query failed: " . $DB->error();
-    echo "<br><strong>Query attempted:</strong> " . htmlspecialchars(substr($software_query, 0, 200)) . "...";
+    echo "No installation records found.";
 }
 echo "</div>";
 
-if ($software_result && $DB->numrows($software_result) > 0) {
+if (count($unique_installations) > 0) {
     $total_installations = count($installations_with_compliance);
     
     // Count by status using the processed compliance data
